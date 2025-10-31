@@ -1,0 +1,46 @@
+# ============================================================================
+# REQUIREMENTS.TXT - Dependencias del Visualizador de Música
+# ============================================================================
+# Instalar todas las dependencias con: pip install -r requirements.txt
+# ============================================================================
+
+# === RENDERIZADO Y GRÁFICOS ===
+# Pygame: Manejo de ventanas, eventos y contexto OpenGL
+pygame>=2.5.0
+
+# PyOpenGL: Bindings de OpenGL para Python
+PyOpenGL>=3.1.6
+
+# PyOpenGL-accelerate: Aceleración opcional para PyOpenGL (recomendado)
+PyOpenGL-accelerate>=3.1.6
+
+# === PROCESAMIENTO DE AUDIO ===
+# SoundDevice: Captura de audio del sistema en tiempo real
+sounddevice>=0.4.6
+
+# === COMPUTACIÓN CIENTÍFICA ===
+# NumPy: Arrays y operaciones matemáticas (FFT, etc.)
+numpy>=1.24.0
+
+# === OPCIONAL (para desarrollo) ===
+# PyAudio: Alternativa a sounddevice (descomentar si prefieres usarlo)
+# pyaudio>=0.2.13
+
+# === NOTAS DE INSTALACIÓN ===
+# 
+# WINDOWS:
+# - Todas las dependencias deberían instalarse sin problemas
+# - Si tienes problemas con PyOpenGL-accelerate, puedes omitirlo
+#
+# LINUX:
+# - Instalar dependencias del sistema primero:
+#   Ubuntu/Debian: sudo apt-get install python3-dev portaudio19-dev
+#   Fedora: sudo dnf install python3-devel portaudio-devel
+#
+# MACOS:
+# - Instalar portaudio con Homebrew:
+#   brew install portaudio
+#
+# VERIFICACIÓN:
+# Después de instalar, verifica con:
+#   python -c "import pygame, OpenGL, sounddevice, numpy; print('OK')"
