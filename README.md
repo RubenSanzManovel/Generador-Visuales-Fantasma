@@ -3,4 +3,4 @@ Es un generador de visuales fantasmas el cual cambia de forma automatica al ritm
 
 El Generador.py es la primera version. Lo de dentro de la carpeta Visualizador es el programa actual. 
 
-#WIP
+# WIP
