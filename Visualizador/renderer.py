@@ -37,21 +37,49 @@ class Renderer:
             # Inicializar Pygame
             pygame.init()
             
-            # Configurar flags de la ventana
-            display_flags = DOUBLEBUF | OPENGL
-            if config.FULLSCREEN:
-                display_flags |= FULLSCREEN
+            # Obtener resolución de pantalla completa
+            display_info = pygame.display.Info()
+            screen_width = display_info.current_w
+            screen_height = display_info.current_h
             
-            # Crear ventana con configuración especificada
+            # Actualizar config con la resolución real
+            config.SCREEN_WIDTH = screen_width
+            config.SCREEN_HEIGHT = screen_height
+            
+            # Configurar flags (ventana sin bordes para evitar problemas con alt+tab)
+            display_flags = DOUBLEBUF | OPENGL | NOFRAME
+            
+            # Crear ventana
             self.screen = pygame.display.set_mode(
-                (config.SCREEN_WIDTH, config.SCREEN_HEIGHT), 
+                (screen_width, screen_height), 
                 display_flags
             )
             pygame.display.set_caption("Visualizador Generativo de Música - Premium Edition")
             
+            # Configurar OpenGL viewport correctamente
+            glViewport(0, 0, screen_width, screen_height)
+            glMatrixMode(GL_PROJECTION)
+            glLoadIdentity()
+            glOrtho(-1, 1, -1, 1, -1, 1)
+            glMatrixMode(GL_MODELVIEW)
+            glLoadIdentity()
+            
+            # Ocultar cursor para experiencia inmersiva
+            pygame.mouse.set_visible(False)
+            
             # Configurar VSync si está habilitado
             if config.VSYNC:
                 pygame.display.gl_set_attribute(pygame.GL_SWAP_CONTROL, 1)
+            
+            # Permitir todos los eventos importantes de ventana
+            pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.KEYUP, 
+                                     pygame.WINDOWFOCUSGAINED, pygame.WINDOWFOCUSLOST,
+                                     pygame.WINDOWMINIMIZED, pygame.WINDOWRESTORED,
+                                     pygame.WINDOWEXPOSED, pygame.WINDOWSHOWN, pygame.WINDOWHIDDEN,
+                                     pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN])
+            
+            # Configurar la ventana para que responda a eventos del sistema
+            pygame.display.set_allow_screensaver(True)
             
             # Información sobre el contexto OpenGL
             print(f"   OpenGL Version: {glGetString(GL_VERSION).decode()}")
@@ -343,6 +371,9 @@ class Renderer:
             
             # Actualizar transición de patrón
             self._update_pattern_transition(state)
+            
+            # Asegurar que el viewport esté configurado correctamente
+            glViewport(0, 0, config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
             
             # Limpiar buffers
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)

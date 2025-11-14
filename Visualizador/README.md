@@ -1,71 +1,35 @@
-# 🎵 Visualizador Generativo de Música - Premium Edition
+# 🎵 Visualizador Generativo de Música
 
-<div align="center">
-
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
-![Python](https://img.shields.io/badge/python-3.8+-green)
-![OpenGL](https://img.shields.io/badge/OpenGL-3.3-red)
-![License](https://img.shields.io/badge/license-MIT-yellow)
-
-**Visualizador de música en tiempo real con 16 efectos visuales únicos generados por shaders GLSL**
-
-[Características](#características) • [Instalación](#instalación) • [Uso](#uso) • [Configuración](#configuración) • [Arquitectura](#arquitectura)
-
-</div>
+**Visualizador de música en tiempo real con 36 efectos visuales únicos en pantalla completa**
 
 ---
 
 ## 📋 Descripción
 
-Este es un visualizador de música profesional que captura el audio del sistema en tiempo real y genera impresionantes efectos visuales reactivos. Utiliza análisis FFT avanzado, detección inteligente de beats, y renderizado GPU mediante shaders GLSL para crear experiencias visuales únicas y fluidas.
+Visualizador de música profesional con interfaz gráfica que captura el audio del sistema en tiempo real y genera impresionantes efectos visuales reactivos. Utiliza análisis FFT avanzado, detección inteligente de beats, y renderizado GPU mediante shaders GLSL.
 
-### ✨ Características Principales
+### ✨ Características
+
+- 🖥️ **Interfaz Gráfica Completa**
+  - Menú visual para selección de modo
+  - Pantalla completa automática
+  - 3 modos de visualización: Admin, Order, Random
 
 - 🎵 **Análisis de Audio Avanzado**
-  - Captura de audio del sistema en tiempo real (loopback)
-  - Análisis FFT con ventana de Hann
-  - Separación por bandas de frecuencia (Bass, Mid, Treble)
+  - Captura de audio del sistema en tiempo real
+  - Análisis FFT con separación por bandas (Bass, Mid, Treble)
   - Detección inteligente de beats con umbral adaptativo
-  - Suavizado temporal para estabilidad
 
-- 🎨 **16 Efectos Visuales Únicos**
-  - Gotas de Agua / Ondas Concéntricas
-  - Túnel Psicodélico
-  - Espiral Glitch
-  - Rejilla Ondulante
-  - Orbe Reactivo con Rayos
-  - Trama de Cubos Isométricos
-  - Tejido Rítmico
-  - Rosa Giratoria
-  - Jardín de Flores
-  - Nido de Hexágonos
-  - Rejilla Hexagonal Reactiva
-  - Caleidoscopio Mixto
-  - Glitch Digital
-  - Triángulos Danzantes
-  - Campo de Explosiones
-  - Hiperimpulso Estelar
-
-- 🚀 **Optimización y Rendimiento**
-  - Renderizado GPU mediante OpenGL 3.3+
-  - Shaders GLSL optimizados
-  - Control de FPS con VSync opcional
-  - Contador de FPS en tiempo real
-  - Sistema de buffers eficiente
-
-- 🎛️ **Post-Processing Profesional**
-  - Efecto Bloom (resplandor)
-  - Viñeta (oscurecimiento de bordes)
-  - Ajuste de contraste
-  - Control de saturación
+- 🎨 **36 Efectos Visuales Únicos**
+  - Renderizado GPU mediante OpenGL 3.3+ y shaders GLSL
+  - Post-processing profesional (Bloom, Viñeta, Contraste)
   - Transiciones suaves entre efectos
+  - Paletas de colores predefinidas
 
 - ⚙️ **Altamente Configurable**
-  - Más de 40 parámetros configurables
-  - Paletas de colores predefinidas (Cyberpunk, Fuego, Océano)
+  - Configuración completa en `config.py`
   - Ajustes de sensibilidad y reactividad
-  - Modo debug con información detallada
-  - Validación automática de configuración
+  - Control de FPS y calidad visual
 
 ---
 
@@ -126,56 +90,35 @@ Requiere software adicional como [BlackHole](https://github.com/ExistentialAudio
 
 ## 🚀 Uso
 
-### Selección de Dispositivo de Audio
+### Ejecución
 
-Antes de ejecutar el visualizador, puedes listar todos los dispositivos de audio disponibles:
+```bash
+python main.py
+```
+
+Se abrirá la interfaz gráfica con las siguientes opciones:
+
+- **MODO ADMIN**: Selecciona un patrón visual específico (0-35) para probarlo
+- **MODO ORDER**: Los patrones cambian cada X beats (configurable: 8, 16, 24, 32, 48, 64)
+- **MODO RANDOM**: Los patrones cambian aleatoriamente cada 30-70 beats
+- **SALIR**: Cierra la aplicación
+
+### Listar Dispositivos de Audio
+
+Si tienes problemas de audio, lista los dispositivos disponibles:
 
 ```bash
 python listar_dispositivos.py
 ```
 
-Esto mostrará todos los dispositivos de entrada y salida, identificando automáticamente:
-- 🔊 **Mezcla estéreo** - Captura todo el audio del sistema
-- 🎧 **Auriculares** - Dispositivos de auriculares específicos
-- 🎤 **Micrófonos** - Entradas de micrófono
-- 🔈 **Altavoces** - Dispositivos de salida
-
-### Ejecución Básica
-
-**Opción 1: Selector Interactivo (Recomendado)**
-```bash
-python main.py
-```
-Te mostrará un menú para elegir el dispositivo de audio.
-
-**Opción 2: Selección Automática**
-```bash
-python main.py --auto
-```
-Usa el dispositivo configurado en `config.py` (por defecto: "Mezcla estéreo").
-
-**Opción 3: Dispositivo Específico por ID**
-```bash
-python main.py --device 2
-```
-Usa el dispositivo con ID 2 (obtén el ID con `listar_dispositivos.py`).
-
-### Controles
+### Controles Durante la Visualización
 
 | Tecla | Acción |
 |-------|--------|
 | `ESC` | Salir del programa |
-| `SPACE` | Cambiar patrón visual manualmente |
+| `SPACE` | Cambiar patrón manualmente (excepto en modo Admin) |
 | `C` | Cambiar color manualmente |
 | `D` | Activar/desactivar modo debug |
-| `F` | Toggle pantalla completa (futuro) |
-
-### Flujo de Trabajo
-
-1. **Iniciar el programa** → Se abrirá una ventana con el visualizador
-2. **Reproducir música** → Usa cualquier aplicación de audio (Spotify, YouTube, etc.)
-3. **Disfrutar** → Los efectos visuales reaccionarán automáticamente
-4. **Personalizar** → Modifica `config.py` según tus preferencias
 
 ---
 
@@ -205,18 +148,26 @@ AUDIO_SMOOTHING_FRAMES = 3   # Frames de suavizado
 ### Detección de Beats
 
 ```python
-BEAT_THRESHOLD = 0.28        # Umbral de detección (0.15 - 0.35)
-BEAT_COOLDOWN = 0.15         # Tiempo mínimo entre beats (segundos)
-BEAT_THRESHOLD_ADAPTATION = 0.02  # Factor de adaptación automática
+BEAT_THRESHOLD = 0.28                    # Umbral de detección
+BEAT_COOLDOWN = 0.15                     # Tiempo mínimo entre beats
+BEAT_THRESHOLD_ADAPTATION = 0.02         # Adaptación automática
+```
+
+### Modos de Cambio de Patrón
+
+```python
+PATTERN_ORDER_MODE = "random"            # "order" o "random"
+SHAPE_CHANGE_BEATS = 16                  # Beats para cambiar (modo order)
+RANDOM_BEAT_RANGE = (30, 70)            # Rango aleatorio (modo random)
 ```
 
 ### Efectos Visuales
 
 ```python
-SENSITIVITY = 2.5            # Sensibilidad a la música (1.0 - 5.0)
-DECAY_RATE = 0.98           # Velocidad de decaimiento (0.9 - 0.99)
-SHAPE_CHANGE_BEATS = 16     # Beats para cambiar de patrón
-RAYS_PER_BEAT = 8           # Partículas generadas por beat
+SENSITIVITY = 2.5                        # Sensibilidad a la música
+DECAY_RATE = 0.98                       # Velocidad de decaimiento
+RAYS_PER_BEAT = 8                       # Partículas por beat
+TOTAL_PATTERNS = 36                     # Total de patrones disponibles
 ```
 
 ### Post-Processing
@@ -244,122 +195,26 @@ COLOR_PALETTE = [
 
 ---
 
-## 🏗️ Arquitectura del Sistema
-
-### Estructura de Archivos
+## 🏗️ Estructura del Proyecto
 
 ```
 Visualizador/
-├── main.py              # Punto de entrada y bucle principal
-├── config.py            # Configuración global
-├── audio_handler.py     # Captura y análisis de audio
-├── renderer.py          # Motor de renderizado OpenGL
+├── main.py                  # Punto de entrada y bucle principal
+├── gui.py                   # Interfaz gráfica de usuario
+├── config.py                # Configuración global
+├── audio_handler.py         # Captura y análisis de audio
+├── renderer.py              # Motor de renderizado OpenGL
+├── listar_dispositivos.py   # Utilidad para listar dispositivos de audio
 ├── shaders/
-│   ├── vertex.glsl      # Vertex shader
-│   └── fragment.glsl    # Fragment shader (efectos visuales)
-├── requirements.txt     # Dependencias de Python
-└── README.md           # Este archivo
+│   ├── vertex.glsl          # Vertex shader
+│   └── fragment.glsl        # Fragment shader (36 efectos visuales)
+├── requirements.txt         # Dependencias de Python
+└── README.md               # Este archivo
 ```
 
-### Flujo de Datos
 
-```
-Audio del Sistema
-        ↓
-  [AudioHandler]
-    • Captura audio (sounddevice)
-    • Análisis FFT
-    • Detección de beats
-    • Análisis por bandas
-        ↓
-    [Estado Global]
-    • Amplitud
-    • Frecuencias (bass/mid/treble)
-    • Beat events
-    • Posiciones de partículas
-        ↓
-    [Renderer]
-    • Envío de uniforms al GPU
-    • Ejecución de shaders
-    • Post-processing
-        ↓
-   Pantalla (60 FPS)
-```
-
-### Componentes Principales
-
-#### 1. AudioHandler (`audio_handler.py`)
-- **Función**: Captura y procesa audio del sistema
-- **Tecnologías**: sounddevice, numpy FFT
-- **Características**:
-  - Callback de audio en thread separado
-  - Análisis FFT con ventana de Hann
-  - Detección de beats con umbral adaptativo
-  - Separación en bandas de frecuencia
-  - Buffers de suavizado temporal
-
-#### 2. Renderer (`renderer.py`)
-- **Función**: Renderiza los efectos visuales usando OpenGL
-- **Tecnologías**: Pygame, PyOpenGL
-- **Características**:
-  - Compilación y validación de shaders
-  - Envío eficiente de uniforms al GPU
-  - Contador de FPS
-  - Manejo de errores OpenGL
-
-#### 3. Fragment Shader (`shaders/fragment.glsl`)
-- **Función**: Define los efectos visuales en el GPU
-- **Lenguaje**: GLSL 3.30
-- **Características**:
-  - 16 patrones visuales únicos
-  - Funciones matemáticas avanzadas (noise, fbm)
-  - Transiciones suaves entre patrones
-  - Post-processing (bloom, viñeta, etc.)
-
-#### 4. Main Loop (`main.py`)
-- **Función**: Coordina todos los componentes
-- **Características**:
-  - Gestión del estado global
-  - Control de FPS
-  - Manejo de eventos (teclado, cierre)
-  - Manejo robusto de errores
 
 ---
-
-## 🎨 Añadir Nuevos Efectos Visuales
-
-### Paso 1: Crear la Función del Efecto en el Shader
-
-Edita `shaders/fragment.glsl`:
-
-```glsl
-/**
- * PATRÓN 16: Tu Nuevo Efecto
- * Descripción de lo que hace
- */
-float pattern_mi_efecto(vec2 uv, float time, float amplitude) {
-    // Tu código aquí
-    // Retorna un valor entre 0.0 y 1.0 (intensidad del efecto)
-    
-    return intensidad_del_efecto;
-}
-```
-
-### Paso 2: Añadir al Selector de Patrones
-
-En la función `main()` del shader:
-
-```glsl
-else if (u_pattern_index == 16) current_intensity = pattern_mi_efecto(uv, u_time, u_amplitude);
-```
-
-### Paso 3: Actualizar la Configuración
-
-En `config.py`:
-
-```python
-TOTAL_PATTERNS = 17  # Incrementar el número total
-```
 
 ---
 
@@ -429,52 +284,8 @@ TOTAL_PATTERNS = 17  # Incrementar el número total
 
 ---
 
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Si quieres añadir nuevos efectos, mejorar el rendimiento, o corregir bugs:
-
-1. Fork del repositorio
-2. Crea una branch para tu feature (`git checkout -b feature/nueva-caracteristica`)
-3. Commit de tus cambios (`git commit -am 'Añade nueva característica'`)
-4. Push a la branch (`git push origin feature/nueva-caracteristica`)
-5. Crea un Pull Request
-
 ---
 
-## 📜 Licencia
+## 🎵 ¡Disfruta!
 
-Este proyecto está bajo la licencia MIT. Ver archivo `LICENSE` para más detalles.
-
----
-
-## 👏 Créditos
-
-**Desarrollado por**: [Tu Nombre]
-**Versión**: 2.0.0 Premium Edition
-**Fecha**: Octubre 2025
-
-### Tecnologías Utilizadas
-- Python 3.x
-- OpenGL 3.3+ / GLSL
-- Pygame
-- NumPy
-- SoundDevice
-
----
-
-## 📞 Soporte
-
-¿Problemas o preguntas?
-- 📧 Email: [tu-email]
-- 🐛 Issues: [GitHub Issues]
-- 📖 Documentación: Este README
-
----
-
-<div align="center">
-
-**Hecho con ❤️ y mucha música 🎵**
-
-⭐ Si te gusta este proyecto, dale una estrella en GitHub ⭐
-
-</div>
+Reproduce tu música favorita y observa los efectos visuales reaccionar en tiempo real en pantalla completa.

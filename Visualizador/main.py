@@ -15,64 +15,75 @@ import numpy as np
 import config
 from renderer import Renderer
 from audio_handler import AudioHandler
+from gui import GUI
 import sys
 import traceback
 from typing import Dict, Any
+import random
 
 # ============================================================================
-# FUNCIONES DE INICIALIZACIÓN
+# FUNCIONES DE INICIALIZACIÓN Y LÓGICA
 # ============================================================================
 
-def initialize_state() -> Dict[str, Any]:
+def _get_next_beat_target(current_mode: str) -> int:
+    """
+    Obtiene el número de beats para el próximo cambio de patrón,
+    según el modo seleccionado.
+    """
+    if current_mode == "random":
+        # Devuelve un número aleatorio dentro del rango especificado en config.py
+        return random.randint(config.RANDOM_BEAT_RANGE[0], config.RANDOM_BEAT_RANGE[1])
+    else:
+        # Devuelve el número fijo del modo "order"
+        return config.SHAPE_CHANGE_BEATS
+
+def initialize_state(pattern_mode: str, initial_pattern: int = 0) -> Dict[str, Any]:
     """
     Inicializa el diccionario de estado que contiene toda la información
     del visualizador que cambia en cada frame.
     
-    El estado es el núcleo del programa: contiene todas las variables que
-    controlan los efectos visuales y se actualizan con el audio.
-    
     Returns:
         Diccionario con el estado inicial del visualizador
     """
-    return {
+    state = {
         # === TIEMPO ===
-        'current_time': 0.0,              # Tiempo transcurrido en segundos desde el inicio
+        'current_time': 0.0,
         
         # === AUDIO - AMPLITUD ===
-        'current_amplitude': 0.0,          # Amplitud actual (volumen instantáneo)
-        'smoothed_amplitude': 0.0,         # Amplitud suavizada (promediada)
+        'current_amplitude': 0.0,
+        'smoothed_amplitude': 0.0,
         
         # === AUDIO - BANDAS DE FRECUENCIA ===
-        'bass_energy': 0.0,                # Energía en frecuencias graves (20-250 Hz)
-        'mid_energy': 0.0,                 # Energía en frecuencias medias (250-2000 Hz)
-        'treble_energy': 0.0,              # Energía en frecuencias agudas (2000-8000 Hz)
+        'bass_energy': 0.0,
+        'mid_energy': 0.0,
+        'treble_energy': 0.0,
         
         # === DETECCIÓN DE BEATS ===
-        'beat_last_time': 0.0,             # Timestamp del último beat detectado
-        'beat_count': 0,                   # Contador de beats desde el último cambio de patrón
-        'beat_intensity': 0.0,             # Intensidad del último beat (relativa al umbral)
+        'beat_last_time': 0.0,
+        'beat_count': 0,
+        'beat_intensity': 0.0,
+        'current_beat_target': 0, # Se establecerá después de inicializar
         
         # === COLORES ===
-        'color_index': 0,                  # Índice del color actual en la paleta
+        'color_index': 0,
         
         # === PATRONES VISUALES ===
-        'pattern_index': 0,                # Índice del patrón visual actual
-        'prev_pattern_index': 0,           # Índice del patrón anterior (para transiciones)
-        'pattern_change_time': 0.0,        # Timestamp del último cambio de patrón
+        'pattern_mode': pattern_mode, # Almacena el modo elegido ('admin', 'random', 'order')
+        'pattern_index': initial_pattern, # Usa el índice inicial (0 o el elegido por admin)
+        'prev_pattern_index': initial_pattern,
+        'pattern_change_time': 0.0,
         
         # === PARTÍCULAS/GOTAS (efectos generados por beats) ===
-        # Posiciones aleatorias de las partículas (coordenadas UV 0-1)
         'drop_positions': np.random.rand(config.MAX_PARTICLES, 2).astype(np.float32),
-        
-        # Timestamps de creación de cada partícula
         'drop_times': np.zeros(config.MAX_PARTICLES, dtype=np.float32),
-        
-        # Índice circular para colocar nuevas partículas
         'drop_index': 0,
         
         # === ESTADÍSTICAS ===
-        'frames_rendered': 0,              # Contador de frames renderizados
+        'frames_rendered': 0,
     }
+    # Establece el primer objetivo de beats
+    state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
+    return state
 
 def print_welcome_message():
     """Imprime mensaje de bienvenida con información del programa."""
@@ -80,34 +91,23 @@ def print_welcome_message():
     print("   🎵 VISUALIZADOR GENERATIVO DE MÚSICA - PREMIUM EDITION 🎵")
     print("=" * 70)
     print("\n📌 CONTROLES:")
-    print("   • ESC o cerrar ventana: Salir del programa")
+    print("   • ESC: Salir del programa")
     print("   • Reproduce música para ver los efectos visuales")
     print("\n💡 CARACTERÍSTICAS:")
     print("   • Análisis de audio en tiempo real (bass, mid, treble)")
     print("   • Detección inteligente de beats con umbral adaptativo")
-    print("   • 16 patrones visuales únicos generados por shaders")
+    print(f"   • {config.TOTAL_PATTERNS} patrones visuales únicos generados por shaders")
     print("   • Transiciones suaves entre efectos")
     print("   • Post-processing (bloom, viñeta, contraste)")
-    print("\n🎧 SELECCIÓN DE DISPOSITIVO DE AUDIO:")
-    print("   • Sin argumentos: Menú interactivo de selección")
-    print("   • --auto: Selección automática del dispositivo configurado")
-    print("   • --device ID: Usar dispositivo específico por ID")
+    print("   • Pantalla completa automática")
     print("\n" + "=" * 70)
-    
-    # Mostrar configuración actual
-    if config.DEBUG_MODE:
-        config.print_config_info()
 
 def validate_environment() -> bool:
     """
     Valida que el entorno esté correctamente configurado.
-    
-    Returns:
-        True si todo está OK, False si hay problemas
     """
     print("\n🔍 Validando entorno...")
     
-    # Verificar que existen los archivos de shaders
     import os
     if not os.path.exists('shaders/vertex.glsl'):
         print("❌ ERROR: No se encuentra shaders/vertex.glsl")
@@ -118,7 +118,6 @@ def validate_environment() -> bool:
     
     print("✅ Shaders encontrados")
     
-    # Validar configuración
     if not config.validate_config():
         print("❌ ERROR: Configuración inválida")
         return False
@@ -146,37 +145,57 @@ def main():
             return 1
         
         # ================================================================
+        # MOSTRAR GUI PARA SELECCIONAR MODO
+        # ================================================================
+        gui = GUI()
+        user_config = gui.show_main_menu()
+        gui.close()
+        
+        # Si el usuario sale, terminar
+        if user_config['mode'] == 'exit':
+            print("\n👋 Saliendo del programa...")
+            return 0
+        
+        # Extraer configuración seleccionada
+        current_pattern_mode = user_config['mode']
+        admin_pattern_index = user_config['pattern']
+        
+        # Configurar beats para modo order
+        if current_pattern_mode == 'order':
+            config.SHAPE_CHANGE_BEATS = user_config['beats']
+        
+        print("\n" + "=" * 70)
+        print(f"⚙️  Modo seleccionado: '{current_pattern_mode.upper()}'")
+        if current_pattern_mode == 'admin':
+            print(f"   Patrón seleccionado: {admin_pattern_index}")
+        elif current_pattern_mode == 'order':
+            print(f"   Cambiando cada: {config.SHAPE_CHANGE_BEATS} beats")
+        elif current_pattern_mode == 'random':
+            print(f"   Cambiando cada: {config.RANDOM_BEAT_RANGE[0]} a {config.RANDOM_BEAT_RANGE[1]} beats")
+        print("=" * 70)
+        
+        # ================================================================
         # INICIALIZACIÓN DE COMPONENTES
         # ================================================================
         print("\n🚀 Iniciando componentes del visualizador...\n")
         
-        # Inicializar renderer (OpenGL + Pygame)
         renderer = Renderer()
-        
-        # Inicializar manejador de audio con detección automática de loopback
         audio_handler = AudioHandler()
         
-        # Iniciar captura de audio
         if not audio_handler.start_stream():
             print("\n❌ No se pudo iniciar la captura de audio")
-            print("   Verifica:")
-            print("   1. Que el dispositivo de audio esté configurado correctamente")
-            print("   2. Que el dispositivo no esté siendo usado por otra aplicación")
-            print("   3. Que tengas permisos para acceder al audio del sistema")
             renderer.close()
             input("\nPresiona Enter para salir...")
             return 1
         
-        # Inicializar estado del visualizador
-        state = initialize_state()
+        # Inicializar estado (pasa el modo y el índice inicial elegido)
+        state = initialize_state(current_pattern_mode, admin_pattern_index)
         
-        # Reloj para controlar FPS
+        if current_pattern_mode != 'admin':
+            print(f"🔥 Modo de cambio: '{state['pattern_mode']}'. Próximo cambio en {state['current_beat_target']} beats.")
+        
         clock = pygame.time.Clock()
-        
-        # Timestamp de inicio (para calcular tiempo transcurrido)
         start_time = pygame.time.get_ticks()
-        
-        # Variable de control del bucle principal
         running = True
         
         print("\n✅ Todos los componentes iniciados correctamente\n")
@@ -184,105 +203,130 @@ def main():
         # ================================================================
         # BUCLE PRINCIPAL
         # ================================================================
-        # Este bucle se ejecuta aproximadamente TARGET_FPS veces por segundo
-        # En cada iteración:
-        # 1. Procesa eventos (teclado, mouse, cierre de ventana)
-        # 2. Actualiza el tiempo
-        # 3. Procesa datos de audio y actualiza el estado
-        # 4. Renderiza el frame actual
-        # 5. Controla el framerate
+        
+        # Variable para controlar si la ventana tiene foco
+        has_focus = True
+        minimized = False
         
         while running:
-            # ============================================================
+            # Pump de eventos para asegurar respuesta del sistema operativo
+            pygame.event.pump()
+            
             # 1. PROCESAMIENTO DE EVENTOS
-            # ============================================================
-            for event in pygame.event.get():
-                # Evento de cierre de ventana
+            events = pygame.event.get()
+            for event in events:
                 if event.type == pygame.QUIT:
                     running = False
                     print("\n👋 Cerrando visualizador...")
                 
-                # Eventos de teclado
+                # Manejar eventos de ventana para evitar bloqueos
+                elif event.type == pygame.WINDOWFOCUSGAINED:
+                    has_focus = True
+                    minimized = False
+                    if config.DEBUG_MODE:
+                        print("🔍 Ventana recuperó el foco")
+                elif event.type == pygame.WINDOWFOCUSLOST:
+                    has_focus = False
+                    if config.DEBUG_MODE:
+                        print("🔍 Ventana perdió el foco")
+                elif event.type == pygame.WINDOWMINIMIZED:
+                    minimized = True
+                    if config.DEBUG_MODE:
+                        print("🔍 Ventana minimizada")
+                elif event.type == pygame.WINDOWRESTORED:
+                    minimized = False
+                    if config.DEBUG_MODE:
+                        print("🔍 Ventana restaurada")
+                elif event.type in (pygame.WINDOWEXPOSED, pygame.WINDOWSHOWN):
+                    # Ventana se volvió visible
+                    pass
+                
                 elif event.type == pygame.KEYDOWN:
-                    # ESC: Salir
                     if event.key == pygame.K_ESCAPE:
                         running = False
                         print("\n👋 Cerrando visualizador...")
                     
-                    # F: Toggle fullscreen (funcionalidad futura)
-                    elif event.key == pygame.K_f:
-                        if config.DEBUG_MODE:
-                            print("🖥️  Toggle fullscreen (funcionalidad futura)")
-                    
-                    # D: Toggle debug mode
                     elif event.key == pygame.K_d:
                         config.DEBUG_MODE = not config.DEBUG_MODE
                         print(f"🐛 Debug mode: {'ON' if config.DEBUG_MODE else 'OFF'}")
                     
-                    # SPACE: Cambiar patrón manualmente
-                    elif event.key == pygame.K_SPACE:
+                    # SPACE: Cambiar patrón manualmente (SOLO SI NO ES ADMIN)
+                    elif event.key == pygame.K_SPACE and state['pattern_mode'] != 'admin':
+                        state['beat_count'] = 0
                         state['pattern_change_time'] = state['current_time']
                         state['prev_pattern_index'] = state['pattern_index']
-                        state['pattern_index'] = (state['pattern_index'] + 1) % config.TOTAL_PATTERNS
-                        print(f"🎨 Patrón cambiado manualmente a: {state['pattern_index']}")
+                        
+                        if state['pattern_mode'] == "random":
+                            new_index = np.random.randint(0, config.TOTAL_PATTERNS)
+                            while new_index == state['pattern_index']:
+                                new_index = np.random.randint(0, config.TOTAL_PATTERNS)
+                            state['pattern_index'] = new_index
+                        else:
+                            state['pattern_index'] = (state['pattern_index'] + 1) % config.TOTAL_PATTERNS
+                        
+                        state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
+                        print(f"🎨 Patrón cambiado manualmente a: {state['pattern_index']}. Próximo en {state['current_beat_target']} beats.")
                     
                     # C: Cambiar color manualmente
                     elif event.key == pygame.K_c:
                         state['color_index'] = (state['color_index'] + 1) % len(config.COLOR_PALETTE)
-                        print(f"🎨 Color cambiado manualmente a: {state['color_index']}")
+                        print(f"🎨 Color cambiado manually a: {state['color_index']}")
             
-            # ============================================================
             # 2. ACTUALIZACIÓN DEL TIEMPO
-            # ============================================================
-            # Calcular tiempo transcurrido en segundos desde el inicio
             state['current_time'] = (pygame.time.get_ticks() - start_time) / 1000.0
             
-            # ============================================================
             # 3. PROCESAMIENTO DE AUDIO
-            # ============================================================
-            # El audio_handler extrae datos de audio, los analiza (FFT),
-            # detecta beats, y actualiza el estado con toda la información
             audio_handler.process_audio(state)
             
-            # ============================================================
+            # Si la ventana está minimizada, no renderizar (ahorra recursos)
+            if minimized:
+                clock.tick(10)  # Reducir FPS cuando está minimizado
+                continue
+            
+            # --- LÓGICA DE CAMBIO DE PATRÓN AUTOMÁTICO ---
+            # (Se salta si estamos en modo admin)
+            if state['pattern_mode'] != 'admin':
+                if state['beat_count'] >= state['current_beat_target']:
+                    state['beat_count'] = 0
+                    state['pattern_change_time'] = state['current_time']
+                    state['prev_pattern_index'] = state['pattern_index']
+                    
+                    if state['pattern_mode'] == "random":
+                        new_index = random.randint(0, config.TOTAL_PATTERNS - 1)
+                        while new_index == state['pattern_index']:
+                            new_index = random.randint(0, config.TOTAL_PATTERNS - 1)
+                        state['pattern_index'] = new_index
+                    else:
+                        state['pattern_index'] = (state['pattern_index'] + 1) % config.TOTAL_PATTERNS
+                    
+                    state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
+                    
+                    if config.DEBUG_MODE:
+                        print(f"🎨 CAMBIO DE PATRÓN a: {state['pattern_index']}. Próximo cambio en {state['current_beat_target']} beats.")
+            
             # 4. RENDERIZADO
-            # ============================================================
-            # El renderer toma el estado y dibuja el frame correspondiente
-            # usando los shaders GLSL con todos los efectos visuales
             renderer.render(state)
             
-            # ============================================================
             # 5. CONTROL DE FRAMERATE
-            # ============================================================
-            # Limitar a TARGET_FPS frames por segundo
-            # clock.tick() espera el tiempo necesario para mantener el framerate
             clock.tick(config.TARGET_FPS)
-            
-            # Incrementar contador de frames
             state['frames_rendered'] += 1
             
-            # Mostrar información de debug periódicamente
             if config.DEBUG_MODE and state['frames_rendered'] % 300 == 0:
+                debug_beat_info = f"Beats: {state['beat_count']} / {state['current_beat_target']}"
+                if state['pattern_mode'] == 'admin':
+                    debug_beat_info = "(Modo Admin: cambios bloqueados)"
+                
                 print(f"\n📊 STATS - Frame {state['frames_rendered']}:")
-                print(f"   Tiempo: {state['current_time']:.2f}s")
-                print(f"   Patrón: {state['pattern_index']}")
+                print(f"   Patrón: {state['pattern_index']} {debug_beat_info}")
                 print(f"   Amplitud: {state['current_amplitude']:.3f}")
-                print(f"   Bass: {state['bass_energy']:.3f}, "
-                      f"Mid: {state['mid_energy']:.3f}, "
-                      f"Treble: {state['treble_energy']:.3f}")
-        
+                
         # ================================================================
         # LIMPIEZA Y CIERRE
         # ================================================================
         print("\n🧹 Limpiando recursos...")
-        
-        # Detener captura de audio
         audio_handler.stop_stream()
-        
-        # Cerrar renderer y OpenGL
         renderer.close()
         
-        # Estadísticas finales
         print(f"\n📊 ESTADÍSTICAS FINALES:")
         print(f"   Frames renderizados: {state['frames_rendered']}")
         print(f"   Tiempo total: {state['current_time']:.2f} segundos")
@@ -297,21 +341,11 @@ def main():
         return 0
     
     except KeyboardInterrupt:
-        # El usuario presionó Ctrl+C
         print("\n\n⚠️  Interrupción del usuario (Ctrl+C)")
         print("🧹 Limpiando recursos...")
-        
-        try:
-            # Limpieza segura de recursos
-            pass
-        except:
-            pass
-        
-        print("👋 Visualizador cerrado")
-        return 130  # Exit code para Ctrl+C
+        return 130
     
     except Exception as e:
-        # Error inesperado
         print("\n" + "!" * 70)
         print("   ❌ ERROR CRÍTICO EN EL PROGRAMA")
         print("!" * 70)
@@ -320,14 +354,6 @@ def main():
         print("\nTraceback completo:")
         traceback.print_exc()
         print("\n" + "!" * 70)
-        
-        # Intentar limpiar recursos
-        try:
-            # Limpieza segura de recursos
-            pass
-        except:
-            pass
-        
         input("\nPresiona Enter para salir...")
         return 1
 
@@ -336,10 +362,6 @@ def main():
 # ============================================================================
 
 if __name__ == '__main__':
-    """
-    Punto de entrada del programa.
-    Ejecuta main() y retorna el código de salida al sistema operativo.
-    """
     try:
         exit_code = main()
         sys.exit(exit_code)

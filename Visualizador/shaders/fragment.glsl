@@ -198,28 +198,43 @@ float pattern_explosion_field(vec2 uv, float time) {
     return ex;
 }
 
+// PATRÓN 15: Hiperimpulso Estelar (Giro "en Seco" con Beat)
 float pattern_star_hyperspace(vec2 uv, float time, float amp) {
     vec2 p = uv - 0.5;
     p.x *= u_resolution.x / u_resolution.y;
 
-    // 1. La velocidad de viaje ahora depende casi por completo de la música.
-    // El 'time' solo añade un movimiento de fondo muy lento.
-    float speed = time * 0.05 + amp * 5.0; // 0.05: Vel. base (MUY LENTA). 5.0: Reacción al ritmo.
+    // --- NUEVA LÓGICA DE ROTACIÓN "EN SECO" ---
+    // 1. 'u_drops_time[0]' es el timestamp del último beat.
+    float time_since_beat = time - u_drops_time[0];
+    
+    // 2. Definimos cuánto dura el giro (ej. 0.4 segundos).
+    float spin_duration = 0.4; // 0.4: Duración del giro en segundos.
+    
+    // 3. 'spin_progress' va de 0.0 (justo en el beat) a 1.0 (0.4s después).
+    float spin_progress = clamp(time_since_beat / spin_duration, 0.0, 1.0);
+    
+    // 4. Creamos una curva de "frenado". pow(..., 3.0) hace que frene más bruscamente al final.
+    // 'spin_amount' es la cantidad total de rotación extra que se añade.
+    // 6.28 = una vuelta completa (2*PI). Aumenta este número para más vueltas.
+    float spin_amount = (1.0 - pow(spin_progress, 3.0)) * 6.28; 
+    
+    // 5. El ángulo base "salta" con cada beat (usando el timestamp como "semilla")
+    // y le sumamos el giro extra que se frena.
+    float base_angle = floor(u_drops_time[0] * 10.0); // Salto a una nueva posición.
+    float rotation_angle = base_angle + spin_amount;
+    
+    p = rotate2d(rotation_angle) * p;
 
-    // 2. Distorsionamos las coordenadas para el efecto de "zoom".
-    // La velocidad controla qué tan "lejos" hemos viajado.
-    vec2 distorted_uv = p / (1.0 - fract(speed * 0.1)); // 0.1: Intensidad del zoom.
-
+    // --- LÓGICA DE ZOOM (sin cambios) ---
+    float speed = time * 0.05 + amp * 5.0;
+    vec2 distorted_uv = p / (1.0 - fract(speed * 0.1));
     float r = length(distorted_uv);
     float a = atan(distorted_uv.y, distorted_uv.x);
 
-    // 3. Creamos las estrellas usando las coordenadas distorsionadas.
-    float stars = random(vec2(floor(a * 40.0), floor(r * 20.0))); // 40.0 y 20.0: Densidad de estrellas.
-    stars = pow(stars, 50.0); // 50.0: Tamaño (más alto = más pequeñas).
-    
-    // 4. El estiramiento de las estrellas (las estelas) sigue dependiendo del volumen.
-    // Esto crea el efecto de "acelerón" cuando la música sube.
-    float stretch = 1.0 - smoothstep(0.0, 0.5, r * (1.0 - amp * 0.9)); // 0.9: Intensidad de las estelas.
+    // --- LÓGICA DE ESTRELLAS (sin cambios) ---
+    float stars = random(vec2(floor(a * 40.0), floor(r * 20.0)));
+    stars = pow(stars, 50.0);
+    float stretch = 1.0 - smoothstep(0.0, 0.5, r * (1.0 - amp * 0.9));
     
     return stars * stretch;
 }
@@ -432,27 +447,57 @@ float pattern_triangle_tessellation(vec2 uv, float time, float amp) {
     return shape + glow + edge;
 }
 
+// PATRÓN 31: Túnel de Distorsión (REACCIÓN DE MÚSICA REDUCIDA)
 float pattern_warp_tunnel(vec2 uv, float time, float amp) {
     vec2 p = uv - 0.5;
     p.x *= u_resolution.x / u_resolution.y;
     float r = length(p);
     float a = atan(p.y, p.x);
-    float glitch_factor = floor(r * 20.0 + amp * 40.0) / 20.0;
-    float depth = glitch_factor * 5.0 + time * 1.5 + u_mid * 2.0;
-    float tunnel = sin(a * 8.0 + depth) * cos(glitch_factor * 20.0 - time * 2.0 + u_bass * 4.0);
-    float rings = sin(glitch_factor * 30.0 - time * 3.0 + u_treble * 5.0) * 0.5 + 0.5;
+
+    // Reacción al volumen reducida (de 40.0 a 5.0)
+    float glitch_factor = floor(r * 20.0 + amp * 5.0) / 20.0; // Antes amp * 40.0
+    
+    // --- AJUSTE DE VELOCIDAD Y REACCIÓN ---
+    // Mantenemos las velocidades de 'time' bajas
+    
+    // Reducimos la influencia de la música (u_mid)
+    // Antes: u_mid * 2.0. Ahora: u_mid * 0.2
+    float depth = glitch_factor * 5.0 + time * 0.03 + u_mid * 0.2; 
+    
+    // Reducimos la influencia de la música (u_bass)
+    // Antes: u_bass * 4.0. Ahora: u_bass * 0.4
+    float tunnel = sin(a * 8.0 + depth) * cos(glitch_factor * 20.0 - time * 0.04 + u_bass * 0.4);
+    
+    // Reducimos la influencia de la música (u_treble)
+    // Antes: u_treble * 5.0. Ahora: u_treble * 0.5
+    float rings = sin(glitch_factor * 30.0 - time * 0.06 + u_treble * 0.5) * 0.5 + 0.5;
+    
     return (tunnel * 0.5 + 0.5) * rings;
 }
 
+// PATRÓN 32: Sueños Pixelados (Versión LENTA Y MENOS EPILÉPTICA)
 float pattern_pixelated_dreams(vec2 uv, float time, float amp) {
-    float pixelSize = 25.0 + sin(time * 0.5 + u_bass * 2.0) * 10.0;
+    // 1. Tamaño de píxel reactivo (velocidad muy reducida)
+    float pixelSize = 25.0 + sin(time * 0.02 + u_bass * 2.0) * 10.0; // Antes: time * 0.1
     vec2 pixelated = floor(uv * pixelSize) / pixelSize;
-    float pattern1 = sin(pixelated.x * 40.0 + time * 1.0 + u_mid * 4.0);
-    float pattern2 = cos(pixelated.y * 40.0 - time * 0.8 + u_treble * 3.0);
-    float checker = mod(floor(pixelated.x * pixelSize) + floor(pixelated.y * pixelSize), 2.0);
-    float noise = random(pixelated + floor(time * 2.0)) * u_beat_intensity * 0.4;
-    float grid = smoothstep(0.02, 0.0, fract(uv.x * pixelSize)) + smoothstep(0.02, 0.0, fract(uv.y * pixelSize));
-    return (pattern1 * pattern2) * 0.5 + 0.5 + noise + checker * 0.1 + grid * 0.15;
+
+    // 2. Patrones base (velocidad muy reducida)
+    float pattern1 = sin(pixelated.x * 40.0 + time * 0.05 + u_mid * 4.0); // Antes: time * 0.2
+    float pattern2 = cos(pixelated.y * 40.0 - time * 0.03 + u_treble * 3.0); // Antes: time * 0.15
+    
+    // 3. Combinación de patrones para un efecto glitch más nítido
+    float combined_pattern = pow(abs(pattern1 * pattern2), 5.0);
+    
+    // 4. Ruido aleatorio (velocidad DRÁSTICAMENTE reducida)
+    // Este es el cambio principal. 'time * 0.1' hace que los píxeles cambien
+    // 5 veces más lento que antes (que era 'time * 0.5').
+    float noise = random(pixelated + floor(time * 0.01)) * u_beat_intensity * 0.5; // Antes: time * 0.5
+    
+    // 5. Rejilla de píxeles (la mantenemos muy sutil)
+    float grid = (smoothstep(0.02, 0.0, fract(uv.x * pixelSize)) + smoothstep(0.02, 0.0, fract(uv.y * pixelSize))) * 0.05;
+
+    // 6. Combinación final
+    return (combined_pattern + noise) * amp * 2.0 + grid;
 }
 
 float pattern_concentric_squares(vec2 uv, float time, float amp) {
@@ -477,6 +522,48 @@ float pattern_infinity_mirror(vec2 uv, float time, float amp) {
     }
     float mirror = sin(length(p) * 5.0 + time * 2.0 + u_mid * 4.0);
     return mirror * 0.5 + 0.5 + u_beat_intensity * 0.2;
+}
+
+// PATRÓN 35: Ecualizador Estilizado (Sin "pared" y más bajo)
+float pattern_equalizer(vec2 uv, float time, float amp) {
+    float num_bars = 40.0; // 40.0: Número de barras.
+    float bar_index = floor(uv.x * num_bars);
+    float bar_x_normalized = bar_index / num_bars;
+
+    // --- LÓGICA DE ALTURA ---
+    float height = 0.0;
+    if (bar_x_normalized < 0.4) {
+        height = u_bass * (bar_x_normalized / 0.4);
+    } else if (bar_x_normalized < 0.8) {
+        height = mix(u_bass, u_mid, (bar_x_normalized - 0.4) / 0.4);
+    } else {
+        height = mix(u_mid, u_treble, (bar_x_normalized - 0.8) / 0.2);
+    }
+    height += sin(time * 2.0 + bar_index) * 0.02; // Ondulación base
+    
+    // --- AJUSTE CLAVE: Reducimos la sensibilidad general ---
+    // Antes era (amp * 2.0 + u_beat_intensity * 0.5)
+    // Ahora es la mitad, para que las barras no suban tanto.
+    height *= (amp * 1.0 + u_beat_intensity * 0.3); // 1.0: Sensibilidad. 0.3: Salto con beat.
+
+    // --- AJUSTE DE POSICIÓN (CON BASE, SIN TECHO) ---
+    // 1. Definimos una base fija para que se vea la parte de abajo.
+    float base_height = 0.05; // Las barras empiezan al 5% de la altura.
+    
+    // 2. La altura final es la base + la altura calculada.
+    // Ya no hay 'max_height' ni 'clamp'. La altura es libre y natural.
+    float final_bar_height = base_height + height;
+
+    // 3. Dibujamos la barra SÓLO entre la base y la altura final.
+    float top = smoothstep(final_bar_height - 0.01, final_bar_height, uv.y); // Borde suave arriba
+    float bottom = smoothstep(base_height - 0.01, base_height, uv.y); // Borde suave abajo
+    float bar_fill = bottom - top; // Relleno
+
+    // 4. Ajustamos el degradado para que empiece en la base de la barra.
+    float bar_relative_y = (uv.y - base_height) / (final_bar_height - base_height);
+    float gradient = 0.3 + bar_relative_y * 0.7; // 0.3: Brillo base. 0.7: Intensidad del degradado.
+    
+    return bar_fill * gradient;
 }
 
 void main() {
@@ -518,6 +605,7 @@ void main() {
     else if (u_pattern_index == 32) intensity = pattern_pixelated_dreams(uv, u_time, u_amplitude);
     else if (u_pattern_index == 33) intensity = pattern_concentric_squares(uv, u_time, u_amplitude);
     else if (u_pattern_index == 34) intensity = pattern_infinity_mirror(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 35) intensity = pattern_equalizer(uv, u_time, u_amplitude);
 
     vec3 bg = vec3(0.0, 0.0, 0.05);
     vec3 color = u_base_color * intensity * 1.5;

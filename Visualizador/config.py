@@ -15,16 +15,16 @@ from typing import Tuple, List
 # ============================================================================
 
 # Resolución de la ventana de renderizado (ancho x alto en píxeles)
-# Valores recomendados: 1920x1080 (Full HD), 1280x720 (HD), 2560x1440 (2K)
-SCREEN_WIDTH: int = 1280
-SCREEN_HEIGHT: int = 1280
+# Estos valores se actualizarán automáticamente con la resolución de pantalla completa
+SCREEN_WIDTH: int = 1920
+SCREEN_HEIGHT: int = 1080
 
 # Control de FPS (frames por segundo) objetivo
 # Mayor FPS = animaciones más fluidas, pero mayor uso de CPU/GPU
 TARGET_FPS: int = 60
 
-# Activar/desactivar modo pantalla completa
-FULLSCREEN: bool = False
+# Activar/desactivar modo pantalla completa (siempre activado para la GUI)
+FULLSCREEN: bool = True
 
 # Activar VSync (sincronización vertical) para evitar screen tearing
 VSYNC: bool = True
@@ -101,13 +101,23 @@ SENSITIVITY: float = 2.5
 # Valores cercanos a 0.0 = decaimiento rápido (efectos desaparecen rápido)
 DECAY_RATE: float = 0.98
 
-# Número de beats necesarios para cambiar al siguiente patrón visual
-# Mayor valor = cada patrón se muestra más tiempo
+# --- ¡NUEVAS OPCIONES DE CAMBIO DE PATRÓN! ---
+
+# Modo de cambio de patrón: "order" (en orden) o "random" (aleatorio)
+PATTERN_ORDER_MODE: str = "random"
+
+# Número de beats necesarios para cambiar (SOLO si PATTERN_ORDER_MODE = "order")
 SHAPE_CHANGE_BEATS: int = 16
+
+# Rango de beats para cambiar (SOLO si PATTERN_ORDER_MODE = "random")
+# El programa elegirá un número aleatorio entre estos dos valores.
+RANDOM_BEAT_RANGE: Tuple[int, int] = (30, 70)
+
+# --- FIN DE NUEVAS OPCIONES ---
 
 # Número total de patrones visuales disponibles en los shaders
 # IMPORTANTE: Debe coincidir con el número de efectos en fragment.glsl
-TOTAL_PATTERNS: int = 35
+TOTAL_PATTERNS: int = 36
 
 # Número de rayos/partículas/gotas generadas por cada beat detectado
 # Mayor valor = efectos más densos y llamativos
@@ -230,6 +240,10 @@ def validate_config() -> bool:
         assert 0.0 < BEAT_THRESHOLD < 1.0, "BEAT_THRESHOLD debe estar entre 0 y 1"
         assert BEAT_COOLDOWN > 0, "BEAT_COOLDOWN debe ser mayor que 0"
         
+        # --- NUEVA VALIDACIÓN ---
+        assert PATTERN_ORDER_MODE in ["order", "random"], "PATTERN_ORDER_MODE debe ser 'order' o 'random'"
+        assert RANDOM_BEAT_RANGE[0] > 0 and RANDOM_BEAT_RANGE[1] >= RANDOM_BEAT_RANGE[0], "RANDOM_BEAT_RANGE inválido"
+        
         # Validar efectos visuales
         assert 0.0 <= DECAY_RATE <= 1.0, "DECAY_RATE debe estar entre 0 y 1"
         assert TOTAL_PATTERNS > 0, "Debe haber al menos un patrón visual"
@@ -260,4 +274,12 @@ def print_config_info():
     print(f"Patrones visuales: {TOTAL_PATTERNS}")
     print(f"Paleta de colores: {len(COLOR_PALETTE)} colores")
     print(f"Detección de beats: Umbral={BEAT_THRESHOLD}, Cooldown={BEAT_COOLDOWN}s")
+    
+    # --- NUEVA INFORMACIÓN ---
+    print(f"Modo de cambio de patrón: {PATTERN_ORDER_MODE}")
+    if PATTERN_ORDER_MODE == "random":
+        print(f"Rango de beats para cambio: {RANDOM_BEAT_RANGE[0]} a {RANDOM_BEAT_RANGE[1]} beats")
+    else:
+        print(f"Beats para cambio: {SHAPE_CHANGE_BEATS} beats")
+        
     print("="*70 + "\n")
