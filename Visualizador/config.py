@@ -117,7 +117,7 @@ RANDOM_BEAT_RANGE: Tuple[int, int] = (30, 70)
 
 # Número total de patrones visuales disponibles en los shaders
 # IMPORTANTE: Debe coincidir con el número de efectos en fragment.glsl
-TOTAL_PATTERNS: int = 36
+TOTAL_PATTERNS: int = 43
 
 # Número de rayos/partículas/gotas generadas por cada beat detectado
 # Mayor valor = efectos más densos y llamativos

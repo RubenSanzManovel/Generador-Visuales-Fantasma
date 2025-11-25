@@ -566,6 +566,357 @@ float pattern_equalizer(vec2 uv, float time, float amp) {
     return bar_fill * gradient;
 }
 
+
+// PATRÓN 36: Pelo Cayendo (Falling Hair) - OPTIMIZADO
+float pattern_falling_hair(vec2 uv, float time, float amp) {
+    float hair = 0.0;
+    // Número fijo de mechones (estable, sin bugs)
+    float num_strands = 100.0;
+    
+    for (float i = 0.0; i < num_strands; i += 1.0) {
+        // Posición horizontal de cada mechón
+        float x_base = i / (num_strands);
+        
+        // Semilla única para cada mechón
+        float strand_seed = random(vec2(x_base * 234.567, 789.123));
+        
+        // Velocidad de caída con MÁS VARIEDAD entre mechones
+        // 0.03: velocidad base | 0.05: MAYOR variación (antes 0.03)
+        float fall_speed = 0.03 + strand_seed * 0.05;
+        
+        // Tiempo de ciclo
+        float cycle_time = time * fall_speed + strand_seed * 100.0;
+        float y_progress = fract(cycle_time) * 1.5 - 0.3;
+        
+        // Longitud del mechón con MÁS VARIEDAD
+        // 0.2: longitud base | 0.25: MAYOR variación (antes 0.15)
+        float strand_length = 0.2 + strand_seed * 0.25;
+        
+        // Parámetros de curva con MÁS VARIEDAD
+        // 2.5 + 3.5: MAYOR rango de frecuencias (antes 3.0 + 2.0)
+        float wave_freq = 2.5 + strand_seed * 3.5;
+        // 0.05 + 0.08: MAYOR rango de amplitudes (antes 0.07 + 0.03)
+        float wave_amp = 0.05 + strand_seed * 0.08;
+        // Ondula un POQUITO más con ritmo rápido (0.2 = muy sutil)
+        wave_amp *= (1.0 + u_bass * 0.2);
+        
+        // Posición vertical relativa al mechón (0 = arriba, 1 = abajo)
+        float y_top = 1.3 - y_progress;
+        float y_bottom = y_top - strand_length;
+        
+        // Solo procesar si el mechón está cerca verticalmente
+        if (uv.y < y_top + 0.02 && uv.y > y_bottom - 0.02) {
+            // Normalizar posición vertical dentro del mechón (0-1)
+            float t = (y_top - uv.y) / strand_length;
+            t = clamp(t, 0.0, 1.0);
+            
+            // Calcular ondulación en este punto (con movimiento suave y constante)
+            float wave_offset = sin(t * strand_length * wave_freq + time * 0.5 + strand_seed* 6.28)* wave_amp;
+            
+            // Posición X esperada del mechón en esta altura
+            float expected_x = x_base + wave_offset;
+            
+            // Distancia horizontal al mechón
+            float dist_x = abs(uv.x - expected_x);
+            
+            // Grosor (más fino en las puntas)
+            float thickness = 0.004 * (1.0 - t*strand_seed * 1.1) * (1.0 + u_mid *strand_seed* 0.55);
+            
+            // Si estamos cerca del mechón
+            if (dist_x < thickness) {
+                // Intensidad basada en distancia
+                float intensity = 1.0 - (dist_x / thickness);
+                intensity = pow(intensity, 1.5); // Concentrar el brillo
+                
+                // Degradado a lo largo del mechón
+                float length_fade = 1.0 - t * 0.6*u_bass;
+                
+                // Fade suave en inicio y fin
+                float fade = smoothstep(0.0, 0.08, t) * smoothstep(1.0, 0.92, t);
+                
+                hair += intensity * length_fade * fade * 2.0;
+            }
+            
+            // Brillo en la punta (solo si estamos cerca del final)
+            if (t > 0.85) {
+                float tip_dist = length(uv - vec2(expected_x, y_bottom));
+                float tip_glow = smoothstep(0.015, 0.0, tip_dist) * u_beat_intensity * 1.5;
+                hair += u_bass*tip_glow;
+            }
+        }
+    }
+    
+    return hair;
+}
+
+// PATRÓN 37: Humo Ascendente
+float pattern_rising_smoke(vec2 uv, float time, float amp) {
+    float smoke = 0.0;
+    
+    // Ruido base para textura de humo
+    float noise1 = sin(uv.x * 10.0 + time * 0.5) * cos(uv.y * 8.0 - time * 0.3);
+    float noise2 = sin(uv.x * 15.0 - time * 0.4) * cos(uv.y * 12.0 + time * 0.6);
+    float turbulence = (noise1 + noise2) * 0.015;
+    
+    // Múltiples columnas de humo CONTINUAS con ciclos desfasados
+    for (float i = 0.0; i < 20.0; i += 1.0) {
+        float x_base = (i + 0.5) / 15.0;
+        float col_seed = random(vec2(x_base * 567.89, 234.56));
+        
+        // Velocidad de subida variable
+        float rise_speed = 0.06 + col_seed * 0.03;
+        rise_speed *= (1.0 + u_mid * 0.3);
+        
+        // DESFASE ÚNICO para cada columna - CRUCIAL para evitar sincronización
+        float time_offset = i * 7.5 + col_seed * 20.0;
+        
+        // Ciclo cada 2.5 unidades - MÁS LARGO para más continuidad
+        float cycle_height = 2.5;
+        float animated_time = (time + time_offset) * rise_speed;
+        float y_base = mod(animated_time, cycle_height) - 0.3;
+        
+        // Calcular distancia vertical al píxel desde la base de este ciclo
+        float y_from_base = uv.y - y_base;
+        
+        // El humo existe en una ventana de altura MÁS AMPLIA
+        if (y_from_base > 0.0 && y_from_base < cycle_height) {
+            // Progreso en el ciclo (0 = base, 1 = arriba)
+            float progress = y_from_base / cycle_height;
+            
+            // Ondulación lateral (aumenta con altura)
+            float sway_amount = progress * 0.1;
+            float sway = sin(uv.y * 4.0 + time + col_seed * 6.28) * sway_amount;
+            sway += cos(uv.y * 2.5 - time * 0.7 + col_seed * 3.14) * sway_amount * 0.6;
+            
+            // Posición X con turbulencia
+            float x_pos = x_base + sway + turbulence;
+            float dist_x = abs(uv.x - x_pos);
+            
+            // Grosor aumenta con la altura
+            float width = 0.012 * (1.0 + progress * progress * 5.0);
+            
+            // Intensidad con distribución suave
+            float intensity = exp(-dist_x * dist_x / (width * width * 0.5));
+            
+            // Fade: aparece suave abajo, desaparece suave arriba
+            float fade = smoothstep(0.0, 0.05, progress) * smoothstep(1.0, 0.85, progress);
+            
+            smoke += intensity * fade * 2.5;
+        }
+    }
+    
+    return smoke;
+}
+
+// PATRÓN 38: Confeti Cayendo
+float pattern_confetti(vec2 uv, float time, float amp) {
+    float confetti = 0.0;
+    float num_pieces = 40.0;
+    
+    for (float i = 0.0; i < num_pieces; i += 1.0) {
+        float x_base = i / num_pieces;
+        float piece_seed = random(vec2(x_base * 456.789, 123.456));
+        
+        // Velocidad errática
+        float fall_speed = 0.05 + piece_seed * 0.04;
+        fall_speed *= (1.0 + u_beat_intensity * 0.8);
+        
+        float cycle_time = time * fall_speed + piece_seed * 100.0;
+        float y_progress = fract(cycle_time) * 1.5 - 0.3;
+        float y_pos = 1.3 - y_progress;
+        
+        // Movimiento caótico horizontal
+        float spin_time = time * (2.0 + piece_seed * 3.0);
+        float x_drift = sin(y_progress * 5.0 + spin_time) * 0.15;
+        float x_pos = x_base + x_drift;
+        
+        // Rotación del confeti (simula forma rectangular)
+        float rotation = spin_time + piece_seed * 6.28;
+        float size_x = 0.015 * abs(cos(rotation)) + 0.003;
+        float size_y = 0.008 * abs(sin(rotation)) + 0.002;
+        
+        vec2 piece_pos = vec2(x_pos, y_pos);
+        vec2 dist = abs(uv - piece_pos);
+        
+        if (dist.x < size_x && dist.y < size_y) {
+            float intensity = (1.0 - dist.x / size_x) * (1.0 - dist.y / size_y);
+            confetti += intensity * 4.0;
+        }
+    }
+    
+    return confetti;
+}
+
+// PATRÓN 39: Estrellas Fugaces
+float pattern_shooting_stars(vec2 uv, float time, float amp) {
+    float stars = 0.0;
+    float num_stars = 8.0;
+    
+    for (float i = 0.0; i < num_stars; i += 1.0) {
+        float star_seed = random(vec2(i * 678.901, 234.567));
+        
+        // Velocidad muy rápida
+        float speed = 0.3 + star_seed * 0.2;
+        speed *= (1.0 + u_bass * 0.5);
+        
+        float cycle_time = time * speed + star_seed * 50.0;
+        float progress = fract(cycle_time);
+        
+        // Trayectoria diagonal
+        float start_x = 0.2 + star_seed * 0.6;
+        float start_y = 1.2;
+        float angle = -0.5 - star_seed * 0.3;
+        
+        vec2 star_pos = vec2(
+            start_x + cos(angle) * progress * 1.5,
+            start_y + sin(angle) * progress * 1.5
+        );
+        
+        // Estela brillante
+        for (float tail = 0.0; tail < 8.0; tail += 1.0) {
+            float tail_offset = tail * 0.015;
+            vec2 tail_pos = star_pos - vec2(cos(angle), sin(angle)) * tail_offset;
+            
+            float dist = length(uv - tail_pos);
+            float tail_fade = 1.0 - tail / 8.0;
+            float glow = smoothstep(0.025, 0.0, dist) * tail_fade * 5.0;
+            
+            // Más brillante con beats
+            stars += glow * (1.5 + u_beat_intensity * 1.0);
+        }
+    }
+    
+    return stars;
+}
+
+// PATRÓN 40: Globos Subiendo
+float pattern_rising_balloons(vec2 uv, float time, float amp) {
+    float balloons = 0.0;
+    float num_balloons = 15.0;
+    
+    for (float i = 0.0; i < num_balloons; i += 1.0) {
+        float x_base = i / num_balloons;
+        float balloon_seed = random(vec2(x_base * 567.890, 345.678));
+        
+        // Velocidad de subida lenta
+        float rise_speed = 0.015 + balloon_seed * 0.01;
+        rise_speed *= (1.0 + u_mid * 0.2);
+        
+        float cycle_time = time * rise_speed + balloon_seed * 100.0;
+        float y_progress = fract(cycle_time) * 1.5 - 0.3;
+        float y_pos = -0.3 + y_progress;
+        
+        // Balanceo suave
+        float sway = sin(time * 1.5 + balloon_seed * 6.28) * 0.08;
+        float x_pos = x_base + sway;
+        
+        vec2 balloon_pos = vec2(x_pos, y_pos);
+        float dist = length(uv - balloon_pos);
+        
+        // Forma de globo (círculo con reflejo)
+        float balloon_size = 0.025 + balloon_seed * 0.015;
+        float balloon_shape = smoothstep(balloon_size, balloon_size * 0.7, dist);
+        
+        // Reflejo brillante
+        vec2 highlight_offset = vec2(-0.008, 0.012);
+        float highlight_dist = length(uv - balloon_pos - highlight_offset);
+        float highlight = smoothstep(0.008, 0.0, highlight_dist) * 1.5;
+        
+        // Cuerda del globo
+        float string_x = abs(uv.x - x_pos);
+        float string_y_start = y_pos - balloon_size;
+        float string_length = 0.1;
+        if (uv.y < string_y_start && uv.y > string_y_start - string_length && string_x < 0.001) {
+            balloons += 0.5;
+        }
+        
+        balloons += (1.0 - balloon_shape) * (3.0 + u_treble * 0.5) + highlight;
+    }
+    
+    return balloons;
+}
+
+// PATRÓN 41: Luciérnagas
+float pattern_fireflies(vec2 uv, float time, float amp) {
+    float fireflies = 0.0;
+    float num_fireflies = 30.0;
+    
+    for (float i = 0.0; i < num_fireflies; i += 1.0) {
+        float fly_seed = random(vec2(i * 789.012, 456.789));
+        
+        // Movimiento errático en todas direcciones
+        float move_speed = 0.05 + fly_seed * 0.03;
+        float cycle = time * move_speed + fly_seed * 100.0;
+        
+        // Trayectoria serpenteante
+        float x_pos = 0.5 + sin(cycle * 2.0 + fly_seed * 6.28) * 0.4;
+        x_pos += cos(cycle * 3.5 + fly_seed * 3.14) * 0.15;
+        
+        float y_pos = 0.5 + cos(cycle * 1.8 + fly_seed * 4.71) * 0.4;
+        y_pos += sin(cycle * 2.7 + fly_seed * 1.57) * 0.15;
+        
+        vec2 fly_pos = vec2(x_pos, y_pos);
+        float dist = length(uv - fly_pos);
+        
+        // Parpadeo
+        float blink_cycle = time * (3.0 + fly_seed * 2.0) + fly_seed * 10.0;
+        float blink = pow(sin(blink_cycle) * 0.5 + 0.5, 3.0);
+        blink *= (0.7 + u_beat_intensity * 0.3);
+        
+        // Resplandor suave
+        float glow = smoothstep(0.025, 0.0, dist) * 4.0;
+        float halo = smoothstep(0.05, 0.0, dist) * 1.0;
+        
+        fireflies += (glow + halo) * blink;
+    }
+    
+    return fireflies;
+}
+
+// PATRÓN 42: Partículas Mágicas
+float pattern_magic_particles(vec2 uv, float time, float amp) {
+    float magic = 0.0;
+    float num_particles = 40.0;
+    
+    for (float i = 0.0; i < num_particles; i += 1.0) {
+        float particle_seed = random(vec2(i * 890.123, 567.890));
+        
+        // Velocidad de subida con variación
+        float rise_speed = 0.03 + particle_seed * 0.02;
+        rise_speed *= (1.0 + u_treble * 0.4);
+        
+        float cycle_time = time * rise_speed + particle_seed * 100.0;
+        float y_progress = fract(cycle_time);
+        
+        // Espiral ascendente
+        float spiral_radius = 0.15 + sin(y_progress * 6.28 * 2.0) * 0.1;
+        float spiral_angle = y_progress * 12.56 + particle_seed * 6.28;
+        
+        float center_x = 0.3 + particle_seed * 0.4;
+        float x_pos = center_x + cos(spiral_angle) * spiral_radius * (1.0 - y_progress * 0.3);
+        float y_pos = -0.2 + y_progress * 1.4;
+        
+        vec2 particle_pos = vec2(x_pos, y_pos);
+        float dist = length(uv - particle_pos);
+        
+        // Brillo pulsante
+        float pulse = sin(time * 5.0 + particle_seed * 6.28) * 0.3 + 0.7;
+        pulse *= (1.0 + u_beat_intensity * 0.5);
+        
+        // Partícula brillante con estela
+        float core = smoothstep(0.01, 0.0, dist) * 5.0;
+        float glow = smoothstep(0.03, 0.0, dist) * 2.5;
+        float halo = smoothstep(0.05, 0.0, dist) * 1.0;
+        
+        // Se desvanece al llegar arriba
+        float fade = 1.0 - pow(y_progress, 2.0);
+        
+        magic += (core + glow + halo) * pulse * fade;
+    }
+    
+    return magic;
+}
+
 void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution;
     float intensity = 0.0;
@@ -606,6 +957,13 @@ void main() {
     else if (u_pattern_index == 33) intensity = pattern_concentric_squares(uv, u_time, u_amplitude);
     else if (u_pattern_index == 34) intensity = pattern_infinity_mirror(uv, u_time, u_amplitude);
     else if (u_pattern_index == 35) intensity = pattern_equalizer(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 36) intensity = pattern_falling_hair(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 37) intensity = pattern_rising_smoke(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 38) intensity = pattern_confetti(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 39) intensity = pattern_shooting_stars(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 40) intensity = pattern_rising_balloons(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 41) intensity = pattern_fireflies(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 42) intensity = pattern_magic_particles(uv, u_time, u_amplitude);
 
     vec3 bg = vec3(0.0, 0.0, 0.05);
     vec3 color = u_base_color * intensity * 1.5;
