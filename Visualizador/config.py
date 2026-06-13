@@ -40,7 +40,25 @@ SAMPLERATE: int = 44100
 # Nombre del dispositivo de captura de audio
 # Para Windows: "Mezcla estéreo" o "Stereo Mix"
 # Para capturar audio del sistema, necesitas habilitar este dispositivo
-DEVICE_NAME: str = "Mezcla estéreo"
+DEVICE_NAME: str = "CABLE Output"
+
+# ID de dispositivo de captura (opcional)
+# Si se establece (numero entero), se usara este ID directamente.
+# Si es None, se busca por DEVICE_NAME.
+DEVICE_ID: int | None = None
+
+# Modo loopback WASAPI (recomendado si usas cascos/auriculares USB o wireless)
+# Si esta activo, se captura el audio del dispositivo de salida indicado.
+USE_WASAPI_LOOPBACK: bool = False
+
+# Nombre o ID del dispositivo de salida a capturar en modo loopback
+# Si OUTPUT_DEVICE_ID esta definido, tiene prioridad sobre el nombre.
+OUTPUT_DEVICE_NAME: str | None = "HyperX Cloud Flight"
+OUTPUT_DEVICE_ID: int | None = None
+
+# Usar el sample rate predeterminado del dispositivo seleccionado
+# Evita fallos cuando el dispositivo trabaja a 48000 Hz y el config esta en 44100 Hz.
+USE_DEVICE_DEFAULT_SAMPLERATE: bool = True
 
 # Número de samples por buffer de audio
 # Mayor valor = más latencia pero análisis más estable
@@ -117,7 +135,7 @@ RANDOM_BEAT_RANGE: Tuple[int, int] = (30, 70)
 
 # Número total de patrones visuales disponibles en los shaders
 # IMPORTANTE: Debe coincidir con el número de efectos en fragment.glsl
-TOTAL_PATTERNS: int = 43
+TOTAL_PATTERNS: int = 42
 
 # Número de rayos/partículas/gotas generadas por cada beat detectado
 # Mayor valor = efectos más densos y llamativos

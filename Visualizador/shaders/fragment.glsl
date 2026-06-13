@@ -12,12 +12,14 @@ uniform float u_bass;
 uniform float u_mid;
 uniform float u_treble;
 uniform float u_beat_intensity;
+uniform float u_last_beat_time;
 uniform int u_prev_pattern_index;
 uniform float u_transition_progress;
 uniform float u_bloom_intensity;
 uniform float u_vignette_intensity;
 uniform float u_contrast;
 uniform float u_saturation;
+uniform float u_zoom;
 
 mat2 rotate2d(float angle) {
     return mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
@@ -47,6 +49,7 @@ float pattern_tunnel(vec2 uv, float time) {
     p.x *= u_resolution.x / u_resolution.y;
     float r = length(p);
     float a = atan(p.y, p.x);
+    a += 6.28318; // Evita corte visual en la discontinuidad angular
     // 0.2: Brillo del túnel | 9.0: Número de espirales | 5.0: Velocidad rotación | 10.0: Reacción bass
     // 30.0: Frecuencia anillos | 5.0: Velocidad anillos | 0.1, 0.5: Intensidades
     return 0.2 / r + sin(a * 9.0 + time * 5.0 + u_bass * 10.0) * 0.1 + cos(r * 30.0 - time * 5.0) * 0.5;
@@ -83,6 +86,8 @@ float pattern_glitchy_orb(vec2 uv, float time, float amp) {
     float a = atan(p.y, p.x);
     float rad = 0.35 + sin(a * 7.0 + time) * 0.02 - u_bass * 0.15;
     float core = 1.0 - smoothstep(rad, rad + 0.05, r);
+    float bg = sin(p.x * 12.0 + time * 0.4 + u_mid * 2.0) * cos(p.y * 10.0 - time * 0.6 + u_bass * 3.0);
+    bg = bg * 0.12 + 0.16;
     float rays = 0.0;
     for (int i = 0; i < 10; i++) {
         float t = time - u_drops_time[i];
@@ -93,7 +98,7 @@ float pattern_glitchy_orb(vec2 uv, float time, float amp) {
             rays += smoothstep(0.2, 0.0, diff) * pow(1.0 - t / 2.0, 3.0);
         }
     }
-    return core + rays;
+    return core + rays + bg;
 }
 
 float pattern_cube_lattice(vec2 uv, float time, float amp) {
@@ -121,9 +126,17 @@ float pattern_spinning_rose(vec2 uv, float time, float amp) {
     p.x *= u_resolution.x / u_resolution.y;
     float r = length(p);
     float a = atan(p.y, p.x);
-    float pet = 7.0 + u_mid * 3.0;
-    float rad = 0.5 * cos(pet * a + time * 0.85) + sin(a * 80.0 + time) * u_treble * 0.5;
-    return 1.0 - smoothstep(abs(rad), abs(rad) + 0.06, r);
+    float pet = 6.0 + u_mid * 4.0;
+    float swirl = sin(a * 18.0 + time * 1.1) * 0.08;
+    float core = 0.32 + sin(time * 0.6 + u_bass * 2.0) * 0.04;
+    float rad = core + 0.18 * cos(pet * a + time * 0.9) + swirl;
+    float bloom = smoothstep(rad, rad - 0.08, r);
+    float edge = smoothstep(rad + 0.02, rad - 0.02, r);
+    float glow = pow(max(0.0, 1.0 - r / 0.65), 2.0) * (0.3 + u_treble * 0.7);
+    float bg = sin(a * 6.0 + time * 0.4 + u_mid * 2.0) * cos(r * 12.0 - time * 0.6 + u_bass * 4.0);
+    bg = bg * 0.15 + 0.2;
+    float pulse = 1.0 + u_beat_intensity * 0.4;
+    return (bloom * 0.8 + edge * 0.6 + glow * 0.5) * pulse + bg;
 }
 
 float pattern_flower_garden(vec2 uv, float time, float amp) {
@@ -164,12 +177,21 @@ float pattern_kaleidoscope(vec2 uv, float time, float amp) {
 }
 
 float pattern_mixed_glitch(vec2 uv, float time, float amp) {
-    float g = fract(floor(uv.y * 20.0 + time * 5.0) / 20.0);
-    vec2 d = uv;
-    d.x += (g - 0.5) * u_bass * 0.3;
-    float r = sin(d.x * 30.0 + time * 2.0) * 0.5 + 0.5;
-    float gr = sin(d.x * 31.0 + time * 2.1) * 0.5 + 0.5;
-    return r * gr + sin(uv.y * 800.0 + time * 50.0) * 0.1 + u_treble * 0.5;
+    float beat_push = smoothstep(0.15, 0.9, u_bass);
+    float tilt = (beat_push + u_beat_intensity * 0.35) * 0.45;
+    vec2 d = uv - 0.5;
+    d = rotate2d(tilt) * d;
+    d += 0.5;
+    float g = fract(floor(d.y * 18.0 + time * 2.5) / 18.0);
+    d.x += (g - 0.5) * (0.18 + beat_push * 0.25);
+    d.y += sin(time * 0.6 + u_mid * 2.0) * 0.01;
+
+    float r = sin(d.x * 24.0 + time * 1.6 + beat_push * 2.0) * 0.5 + 0.5;
+    float gr = sin(d.x * 25.0 + time * 1.7 + beat_push * 2.2) * 0.5 + 0.5;
+    float flicker = sin(uv.y * 220.0 + time * 14.0 + u_treble * 8.0) * 0.08;
+    float scan = smoothstep(0.9, 0.95, fract(uv.y * 6.0 + time * 0.4));
+
+    return r * gr + flicker + scan * 0.15 + u_treble * 0.35;
 }
 
 float pattern_dancing_triangles(vec2 uv, float time, float amp) {
@@ -232,11 +254,12 @@ float pattern_star_hyperspace(vec2 uv, float time, float amp) {
     float a = atan(distorted_uv.y, distorted_uv.x);
 
     // --- LÓGICA DE ESTRELLAS (sin cambios) ---
-    float stars = random(vec2(floor(a * 40.0), floor(r * 20.0)));
-    stars = pow(stars, 50.0);
-    float stretch = 1.0 - smoothstep(0.0, 0.5, r * (1.0 - amp * 0.9));
+    float stars = random(vec2(floor(a * 28.0), floor(r * 14.0)));
+    stars = pow(stars, 18.0);
+    float stretch = 1.0 - smoothstep(0.0, 0.7, r * (1.0 - amp * 0.7));
+    float bass_boost = 1.0 + u_bass * 1.4 + u_beat_intensity * 0.6;
     
-    return stars * stretch;
+    return stars * stretch * bass_boost;
 }
 
 float pattern_wave_distortion(vec2 uv, float time, float amp) {
@@ -408,13 +431,14 @@ float pattern_voronoi_cells(vec2 uv, float time, float amp) {
 
 float pattern_oscillating_bars(vec2 uv, float time, float amp) {
     float bars = 0.0;
-    float offset1 = sin(time * 1.2 + u_bass * 3.0) * 0.3;
-    float offset2 = cos(time * 1.5 + u_mid * 3.0) * 0.3;
-    bars += smoothstep(0.012, 0.0, abs(sin((uv.y + offset1) * 12.0 + time * 1.5 + u_treble * 4.0) - 0.5));
-    bars += smoothstep(0.012, 0.0, abs(sin((uv.x + offset2) * 10.0 - time * 1.2 + u_bass * 4.0) - 0.5));
+    float bass_shake = smoothstep(0.25, 0.8, u_bass);
+    float offset1 = sin(time * 0.35 + u_bass * 1.5) * (0.08 + bass_shake * 0.18);
+    float offset2 = cos(time * 0.4 + u_mid * 1.2) * (0.08 + bass_shake * 0.18);
+    bars += smoothstep(0.04, 0.0, abs(sin((uv.y + offset1) * 12.0 + time * 0.6 + u_treble * 2.0) - 0.5));
+    bars += smoothstep(0.04, 0.0, abs(sin((uv.x + offset2) * 10.0 - time * 0.5 + u_bass * 2.0) - 0.5));
     vec2 diag = rotate2d(0.785398) * (uv - 0.5);
-    bars += smoothstep(0.012, 0.0, abs(sin((diag.y - offset1) * 8.0 + time * 1.0 + u_mid * 3.0) - 0.5)) * 0.5;
-    float pulse = (1.0 + sin(length(uv - 0.5) * 10.0 - time * 3.0) * 0.3) * (1.0 + u_beat_intensity * 0.5);
+    bars += smoothstep(0.04, 0.0, abs(sin((diag.y - offset1) * 8.0 + time * 0.5 + u_mid * 1.5) - 0.5)) * 0.5;
+    float pulse = (1.0 + sin(length(uv - 0.5) * 6.0 - time * 1.2) * 0.2) * (1.0 + u_beat_intensity * 0.3);
     return bars * pulse;
 }
 
@@ -477,27 +501,29 @@ float pattern_warp_tunnel(vec2 uv, float time, float amp) {
 
 // PATRÓN 32: Sueños Pixelados (Versión LENTA Y MENOS EPILÉPTICA)
 float pattern_pixelated_dreams(vec2 uv, float time, float amp) {
-    // 1. Tamaño de píxel reactivo (velocidad muy reducida)
-    float pixelSize = 25.0 + sin(time * 0.02 + u_bass * 2.0) * 10.0; // Antes: time * 0.1
+    float bass_pulse = smoothstep(0.15, 0.8, u_bass);
+    float slow_time = time * 0.015;
+
+    // 1. Tamaño de píxel reactivo y lento
+    float pixelSize = 28.0 + sin(slow_time + u_bass * 1.5) * (6.0 + bass_pulse * 6.0);
     vec2 pixelated = floor(uv * pixelSize) / pixelSize;
 
-    // 2. Patrones base (velocidad muy reducida)
-    float pattern1 = sin(pixelated.x * 40.0 + time * 0.05 + u_mid * 4.0); // Antes: time * 0.2
-    float pattern2 = cos(pixelated.y * 40.0 - time * 0.03 + u_treble * 3.0); // Antes: time * 0.15
-    
-    // 3. Combinación de patrones para un efecto glitch más nítido
-    float combined_pattern = pow(abs(pattern1 * pattern2), 5.0);
-    
-    // 4. Ruido aleatorio (velocidad DRÁSTICAMENTE reducida)
-    // Este es el cambio principal. 'time * 0.1' hace que los píxeles cambien
-    // 5 veces más lento que antes (que era 'time * 0.5').
-    float noise = random(pixelated + floor(time * 0.01)) * u_beat_intensity * 0.5; // Antes: time * 0.5
-    
-    // 5. Rejilla de píxeles (la mantenemos muy sutil)
-    float grid = (smoothstep(0.02, 0.0, fract(uv.x * pixelSize)) + smoothstep(0.02, 0.0, fract(uv.y * pixelSize))) * 0.05;
+    // 2. Patrones base (muy lentos)
+    float pattern1 = sin(pixelated.x * 35.0 + slow_time * 0.6 + u_mid * 2.0);
+    float pattern2 = cos(pixelated.y * 35.0 - slow_time * 0.5 + u_treble * 1.8);
+
+    // 3. Combinación más suave
+    float combined_pattern = pow(abs(pattern1 * pattern2), 4.0);
+
+    // 4. Ruido que cambia con los bajos (pulsos)
+    float noise_time = floor(time * (0.5 + bass_pulse * 3.0));
+    float noise = random(pixelated + noise_time) * (0.2 + bass_pulse * 0.8);
+
+    // 5. Rejilla de píxeles sutil
+    float grid = (smoothstep(0.02, 0.0, fract(uv.x * pixelSize)) + smoothstep(0.02, 0.0, fract(uv.y * pixelSize))) * 0.04;
 
     // 6. Combinación final
-    return (combined_pattern + noise) * amp * 2.0 + grid;
+    return (combined_pattern * 0.8 + noise * 0.6) * (0.9 + amp * 1.1) + grid;
 }
 
 float pattern_concentric_squares(vec2 uv, float time, float amp) {
@@ -524,46 +550,55 @@ float pattern_infinity_mirror(vec2 uv, float time, float amp) {
     return mirror * 0.5 + 0.5 + u_beat_intensity * 0.2;
 }
 
-// PATRÓN 35: Ecualizador Estilizado (Sin "pared" y más bajo)
+// PATRÓN 35: Ecualizador Estilizado - Centrado y Simétrico (Espejo Arriba/Abajo)
 float pattern_equalizer(vec2 uv, float time, float amp) {
-    float num_bars = 40.0; // 40.0: Número de barras.
+    float num_bars = 80.0; // Número de barras
     float bar_index = floor(uv.x * num_bars);
-    float bar_x_normalized = bar_index / num_bars;
+    float bar_fract = fract(uv.x * num_bars);
+    
+    // Posición normalizada de la barra en el rango [0, 1]
+    float bar_pos = (bar_index + 0.5) / num_bars;
 
-    // --- LÓGICA DE ALTURA ---
+    // --- CADA BARRA REACCIONA SEGÚN SU POSICIÓN EN EL ESPECTRO ---
+    // Interpolación suave: bass -> mid -> treble
     float height = 0.0;
-    if (bar_x_normalized < 0.4) {
-        height = u_bass * (bar_x_normalized / 0.4);
-    } else if (bar_x_normalized < 0.8) {
-        height = mix(u_bass, u_mid, (bar_x_normalized - 0.4) / 0.4);
+    
+    if (bar_pos < 0.5) {
+        // Primera mitad: interpolar de bass a mid
+        float t = bar_pos / 0.5; // 0 a 1
+        height = mix(u_bass, u_mid, t);
     } else {
-        height = mix(u_mid, u_treble, (bar_x_normalized - 0.8) / 0.2);
+        // Segunda mitad: interpolar de mid a treble
+        float t = (bar_pos - 0.5) / 0.5; // 0 a 1
+        height = mix(u_mid, u_treble, t);
     }
-    height += sin(time * 2.0 + bar_index) * 0.02; // Ondulación base
     
-    // --- AJUSTE CLAVE: Reducimos la sensibilidad general ---
-    // Antes era (amp * 2.0 + u_beat_intensity * 0.5)
-    // Ahora es la mitad, para que las barras no suban tanto.
-    height *= (amp * 1.0 + u_beat_intensity * 0.3); // 1.0: Sensibilidad. 0.3: Salto con beat.
-
-    // --- AJUSTE DE POSICIÓN (CON BASE, SIN TECHO) ---
-    // 1. Definimos una base fija para que se vea la parte de abajo.
-    float base_height = 0.05; // Las barras empiezan al 5% de la altura.
+    // Ondulación MÁS SUAVE
+    height += sin(time * 0.5 + bar_index * 0.3) * 0.004;
     
-    // 2. La altura final es la base + la altura calculada.
-    // Ya no hay 'max_height' ni 'clamp'. La altura es libre y natural.
-    float final_bar_height = base_height + height;
+    // --- AMPLITUD CONTROLADA CON RESPUESTA EXPONENCIAL ---
+    height *= (amp * 2.5 + u_beat_intensity * 0.8);
+    height = pow(max(height, 0.01), 1.4);
 
-    // 3. Dibujamos la barra SÓLO entre la base y la altura final.
-    float top = smoothstep(final_bar_height - 0.01, final_bar_height, uv.y); // Borde suave arriba
-    float bottom = smoothstep(base_height - 0.01, base_height, uv.y); // Borde suave abajo
-    float bar_fill = bottom - top; // Relleno
-
-    // 4. Ajustamos el degradado para que empiece en la base de la barra.
-    float bar_relative_y = (uv.y - base_height) / (final_bar_height - base_height);
-    float gradient = 0.3 + bar_relative_y * 0.7; // 0.3: Brillo base. 0.7: Intensidad del degradado.
+    // --- FONDO REACTIVO SUTIL ---
+    float avg_frequency = (u_bass + u_mid + u_treble) / 3.0;
+    float background = 0.08 + avg_frequency * 0.12;
+    background += sin(uv.y * 3.0 + time * 0.3) * 0.02;
     
-    return bar_fill * gradient;
+    // --- CENTRO EN MITAD DE LA PANTALLA CON EFECTO ESPEJO ---
+    float center = 0.5;
+    float abs_distance = abs(uv.y - center);
+    
+    // Suavización de bordes para el ecualizador
+    float bar_fill = smoothstep(height + 0.02, height - 0.02, abs_distance);
+    
+    // Gradiente del ecualizador
+    float gradient = 0.15 + (1.0 - abs_distance / max(height, 0.01)) * 0.85;
+    
+    // Combinar ecualizador con fondo
+    float result = mix(background, bar_fill * gradient, bar_fill);
+    
+    return result;
 }
 
 
@@ -646,72 +681,73 @@ float pattern_falling_hair(vec2 uv, float time, float amp) {
         }
     }
     
-    return hair;
+    // --- FONDO REACTIVO SUTIL ---
+    float avg_frequency = (u_bass + u_mid + u_treble) / 3.0;
+    float background = 0.08 + avg_frequency * 0.12;
+    background += sin(uv.y * 3.0 + time * 0.3) * 0.02;
+    
+    // Combinar cabello con fondo
+    float result = mix(background, hair, clamp(hair, 0.0, 1.0));
+    
+    return result;
 }
 
-// PATRÓN 37: Humo Ascendente
+// PATRÓN 37: Humo Ascendente - REACTIVO AL RITMO
 float pattern_rising_smoke(vec2 uv, float time, float amp) {
     float smoke = 0.0;
     
-    // Ruido base para textura de humo
-    float noise1 = sin(uv.x * 10.0 + time * 0.5) * cos(uv.y * 8.0 - time * 0.3);
-    float noise2 = sin(uv.x * 15.0 - time * 0.4) * cos(uv.y * 12.0 + time * 0.6);
-    float turbulence = (noise1 + noise2) * 0.015;
-    
-    // Múltiples columnas de humo CONTINUAS con ciclos desfasados
-    for (float i = 0.0; i < 20.0; i += 1.0) {
-        float x_base = (i + 0.5) / 15.0;
-        float col_seed = random(vec2(x_base * 567.89, 234.56));
+    // Crear múltiples capas de humo suave (estructura que funcionaba bien)
+    for (float layer = 0.0; layer < 8.0; layer += 1.0) {
+        // Base X para esta capa
+        float x_base = 0.5 + sin(layer * 1.5 + time * 0.1) * 0.3;
         
-        // Velocidad de subida variable
-        float rise_speed = 0.06 + col_seed * 0.03;
-        rise_speed *= (1.0 + u_mid * 0.3);
+        // Y animado: el humo asciende de forma suave
+        float rise_speed = 0.3 + layer * 0.05;
+        float y_pos = mod(uv.y + time * rise_speed + layer * 0.5, 2.0) - 0.5;
         
-        // DESFASE ÚNICO para cada columna - CRUCIAL para evitar sincronización
-        float time_offset = i * 7.5 + col_seed * 20.0;
+        // Desviación lateral suave
+        float wave = sin(y_pos * 6.28 + time * 0.5 + layer * 2.0) * 0.15;
+        float sway = cos(y_pos * 3.0 - time * 0.3 + layer) * 0.1;
         
-        // Ciclo cada 2.5 unidades - MÁS LARGO para más continuidad
-        float cycle_height = 2.5;
-        float animated_time = (time + time_offset) * rise_speed;
-        float y_base = mod(animated_time, cycle_height) - 0.3;
+        // Distancia al centro del humo
+        float dist = distance(uv, vec2(x_base + wave + sway, y_pos + 0.5));
         
-        // Calcular distancia vertical al píxel desde la base de este ciclo
-        float y_from_base = uv.y - y_base;
+        // Radio de la capa de humo (DEPENDE DEL BASS - BOMBOS)
+        // Más bass = humo más gordo, menos bass = más fino
+        float base_radius = 0.12 * (0.5 + u_bass * 0.5); // Oscila entre 0.06 y 0.12
+        float smoke_radius = base_radius + abs(sin(y_pos)) * 0.08;
         
-        // El humo existe en una ventana de altura MÁS AMPLIA
-        if (y_from_base > 0.0 && y_from_base < cycle_height) {
-            // Progreso en el ciclo (0 = base, 1 = arriba)
-            float progress = y_from_base / cycle_height;
-            
-            // Ondulación lateral (aumenta con altura)
-            float sway_amount = progress * 0.1;
-            float sway = sin(uv.y * 4.0 + time + col_seed * 6.28) * sway_amount;
-            sway += cos(uv.y * 2.5 - time * 0.7 + col_seed * 3.14) * sway_amount * 0.6;
-            
-            // Posición X con turbulencia
-            float x_pos = x_base + sway + turbulence;
-            float dist_x = abs(uv.x - x_pos);
-            
-            // Grosor aumenta con la altura
-            float width = 0.012 * (1.0 + progress * progress * 5.0);
-            
-            // Intensidad con distribución suave
-            float intensity = exp(-dist_x * dist_x / (width * width * 0.5));
-            
-            // Fade: aparece suave abajo, desaparece suave arriba
-            float fade = smoothstep(0.0, 0.05, progress) * smoothstep(1.0, 0.85, progress);
-            
-            smoke += intensity * fade * 2.5;
-        }
+        // Suavidad Gaussiana
+        float intensity = exp(-dist * dist / (smoke_radius * smoke_radius));
+        
+        // Fade: más opaco en el medio, transparente en bordes
+        float fade = smoothstep(smoke_radius, 0.0, dist);
+        
+        // Reacción al audio:
+        // - Bass (bombos): afecta al grosor (ya está arriba)
+        // - Treble (altos): afecta a la intensidad/brillo
+        // - Beat: hace que aparezca más de golpe
+        float audio_intensity = 0.4 + u_bass * 0.3 + u_treble * 0.2 + u_beat_intensity * 0.1;
+        intensity *= audio_intensity;
+        
+        smoke += intensity * fade * 1.2;
     }
     
-    return smoke;
+    // --- FONDO CONSISTENTE ---
+    float avg_frequency = (u_bass + u_mid + u_treble) / 3.0;
+    float background = 0.12 + avg_frequency * 0.15;
+    background += sin(uv.y * 3.0 + time * 0.3) * 0.03;
+    
+    // Combinar: el fondo es siempre visible, el humo lo anima
+    float result = max(smoke, background);
+    
+    return result;
 }
 
 // PATRÓN 38: Confeti Cayendo
 float pattern_confetti(vec2 uv, float time, float amp) {
     float confetti = 0.0;
-    float num_pieces = 40.0;
+    float num_pieces = 120.0;
     
     for (float i = 0.0; i < num_pieces; i += 1.0) {
         float x_base = i / num_pieces;
@@ -732,15 +768,15 @@ float pattern_confetti(vec2 uv, float time, float amp) {
         
         // Rotación del confeti (simula forma rectangular)
         float rotation = spin_time + piece_seed * 6.28;
-        float size_x = 0.015 * abs(cos(rotation)) + 0.003;
-        float size_y = 0.008 * abs(sin(rotation)) + 0.002;
+        float size_x = 0.02 * abs(cos(rotation)) + 0.004;
+        float size_y = 0.012 * abs(sin(rotation)) + 0.003;
         
         vec2 piece_pos = vec2(x_pos, y_pos);
         vec2 dist = abs(uv - piece_pos);
         
         if (dist.x < size_x && dist.y < size_y) {
             float intensity = (1.0 - dist.x / size_x) * (1.0 - dist.y / size_y);
-            confetti += intensity * 4.0;
+            confetti += intensity * 2.2;
         }
     }
     
@@ -750,96 +786,49 @@ float pattern_confetti(vec2 uv, float time, float amp) {
 // PATRÓN 39: Estrellas Fugaces
 float pattern_shooting_stars(vec2 uv, float time, float amp) {
     float stars = 0.0;
-    float num_stars = 8.0;
-    
+    float num_stars = 42.0;
+
     for (float i = 0.0; i < num_stars; i += 1.0) {
-        float star_seed = random(vec2(i * 678.901, 234.567));
-        
-        // Velocidad muy rápida
-        float speed = 0.3 + star_seed * 0.2;
-        speed *= (1.0 + u_bass * 0.5);
-        
-        float cycle_time = time * speed + star_seed * 50.0;
-        float progress = fract(cycle_time);
-        
-        // Trayectoria diagonal
-        float start_x = 0.2 + star_seed * 0.6;
-        float start_y = 1.2;
-        float angle = -0.5 - star_seed * 0.3;
-        
-        vec2 star_pos = vec2(
-            start_x + cos(angle) * progress * 1.5,
-            start_y + sin(angle) * progress * 1.5
-        );
-        
-        // Estela brillante
-        for (float tail = 0.0; tail < 8.0; tail += 1.0) {
-            float tail_offset = tail * 0.015;
-            vec2 tail_pos = star_pos - vec2(cos(angle), sin(angle)) * tail_offset;
-            
+        float star_seed = random(vec2(i * 731.337, 119.531));
+
+        float speed = 0.025 + star_seed * 0.05 + u_bass * 0.04;
+        float base_progress = fract(time * speed + star_seed * 3.7);
+        float beat_age = max(time - u_last_beat_time, 0.0);
+        float beat_kick = exp(-beat_age * 8.0) * (0.08 + u_bass * 0.06);
+        float progress = fract(base_progress + beat_kick);
+
+        vec2 start = vec2(fract(star_seed * 17.3), 1.05 + star_seed * 0.2);
+        vec2 dir = normalize(vec2(-0.35 + star_seed * 0.7, -1.0));
+        float travel = 1.1 + star_seed * 0.8;
+        vec2 star_pos = start + dir * progress * travel;
+
+        float tail_len = 0.05 + star_seed * 0.08 + u_beat_intensity * 0.08;
+        float tail_steps = 10.0;
+
+        for (float t = 0.0; t < 10.0; t += 1.0) {
+            float tail_offset = (t / tail_steps) * tail_len;
+            vec2 tail_pos = star_pos - dir * tail_offset;
+
             float dist = length(uv - tail_pos);
-            float tail_fade = 1.0 - tail / 8.0;
-            float glow = smoothstep(0.025, 0.0, dist) * tail_fade * 5.0;
-            
-            // Más brillante con beats
-            stars += glow * (1.5 + u_beat_intensity * 1.0);
+            float tail_fade = 1.0 - t / tail_steps;
+            float flicker = 0.85 + 0.15 * sin(time * 3.0 + star_seed * 6.28 + t);
+            float glow = smoothstep(0.03, 0.0, dist) * tail_fade * 2.0;
+
+            stars += glow * flicker * (1.2 + u_treble * 0.8);
         }
     }
-    
+
+    float twinkle = random(vec2(floor(uv.x * 110.0), floor(uv.y * 90.0)));
+    twinkle = pow(twinkle, 13.0) * (0.55 + u_treble * 0.75);
+    stars += twinkle;
+
     return stars;
 }
 
-// PATRÓN 40: Globos Subiendo
-float pattern_rising_balloons(vec2 uv, float time, float amp) {
-    float balloons = 0.0;
-    float num_balloons = 15.0;
-    
-    for (float i = 0.0; i < num_balloons; i += 1.0) {
-        float x_base = i / num_balloons;
-        float balloon_seed = random(vec2(x_base * 567.890, 345.678));
-        
-        // Velocidad de subida lenta
-        float rise_speed = 0.015 + balloon_seed * 0.01;
-        rise_speed *= (1.0 + u_mid * 0.2);
-        
-        float cycle_time = time * rise_speed + balloon_seed * 100.0;
-        float y_progress = fract(cycle_time) * 1.5 - 0.3;
-        float y_pos = -0.3 + y_progress;
-        
-        // Balanceo suave
-        float sway = sin(time * 1.5 + balloon_seed * 6.28) * 0.08;
-        float x_pos = x_base + sway;
-        
-        vec2 balloon_pos = vec2(x_pos, y_pos);
-        float dist = length(uv - balloon_pos);
-        
-        // Forma de globo (círculo con reflejo)
-        float balloon_size = 0.025 + balloon_seed * 0.015;
-        float balloon_shape = smoothstep(balloon_size, balloon_size * 0.7, dist);
-        
-        // Reflejo brillante
-        vec2 highlight_offset = vec2(-0.008, 0.012);
-        float highlight_dist = length(uv - balloon_pos - highlight_offset);
-        float highlight = smoothstep(0.008, 0.0, highlight_dist) * 1.5;
-        
-        // Cuerda del globo
-        float string_x = abs(uv.x - x_pos);
-        float string_y_start = y_pos - balloon_size;
-        float string_length = 0.1;
-        if (uv.y < string_y_start && uv.y > string_y_start - string_length && string_x < 0.001) {
-            balloons += 0.5;
-        }
-        
-        balloons += (1.0 - balloon_shape) * (3.0 + u_treble * 0.5) + highlight;
-    }
-    
-    return balloons;
-}
-
-// PATRÓN 41: Luciérnagas
+// PATRÓN 40: Luciérnagas
 float pattern_fireflies(vec2 uv, float time, float amp) {
     float fireflies = 0.0;
-    float num_fireflies = 30.0;
+    float num_fireflies = 60.0;
     
     for (float i = 0.0; i < num_fireflies; i += 1.0) {
         float fly_seed = random(vec2(i * 789.012, 456.789));
@@ -864,8 +853,8 @@ float pattern_fireflies(vec2 uv, float time, float amp) {
         blink *= (0.7 + u_beat_intensity * 0.3);
         
         // Resplandor suave
-        float glow = smoothstep(0.025, 0.0, dist) * 4.0;
-        float halo = smoothstep(0.05, 0.0, dist) * 1.0;
+        float glow = smoothstep(0.04, 0.0, dist) * 5.5;
+        float halo = smoothstep(0.08, 0.0, dist) * 1.6;
         
         fireflies += (glow + halo) * blink;
     }
@@ -873,10 +862,10 @@ float pattern_fireflies(vec2 uv, float time, float amp) {
     return fireflies;
 }
 
-// PATRÓN 42: Partículas Mágicas
+// PATRÓN 41: Partículas Mágicas
 float pattern_magic_particles(vec2 uv, float time, float amp) {
     float magic = 0.0;
-    float num_particles = 40.0;
+    float num_particles = 80.0;
     
     for (float i = 0.0; i < num_particles; i += 1.0) {
         float particle_seed = random(vec2(i * 890.123, 567.890));
@@ -904,9 +893,9 @@ float pattern_magic_particles(vec2 uv, float time, float amp) {
         pulse *= (1.0 + u_beat_intensity * 0.5);
         
         // Partícula brillante con estela
-        float core = smoothstep(0.01, 0.0, dist) * 5.0;
-        float glow = smoothstep(0.03, 0.0, dist) * 2.5;
-        float halo = smoothstep(0.05, 0.0, dist) * 1.0;
+        float core = smoothstep(0.015, 0.0, dist) * 5.0;
+        float glow = smoothstep(0.035, 0.0, dist) * 3.2;
+        float halo = smoothstep(0.07, 0.0, dist) * 1.6;
         
         // Se desvanece al llegar arriba
         float fade = 1.0 - pow(y_progress, 2.0);
@@ -919,6 +908,7 @@ float pattern_magic_particles(vec2 uv, float time, float amp) {
 
 void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution;
+    uv = (uv - 0.5) / u_zoom + 0.5;
     float intensity = 0.0;
 
     if (u_pattern_index == 0)       intensity = pattern_raindrops(uv, u_time);
@@ -961,9 +951,8 @@ void main() {
     else if (u_pattern_index == 37) intensity = pattern_rising_smoke(uv, u_time, u_amplitude);
     else if (u_pattern_index == 38) intensity = pattern_confetti(uv, u_time, u_amplitude);
     else if (u_pattern_index == 39) intensity = pattern_shooting_stars(uv, u_time, u_amplitude);
-    else if (u_pattern_index == 40) intensity = pattern_rising_balloons(uv, u_time, u_amplitude);
-    else if (u_pattern_index == 41) intensity = pattern_fireflies(uv, u_time, u_amplitude);
-    else if (u_pattern_index == 42) intensity = pattern_magic_particles(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 40) intensity = pattern_fireflies(uv, u_time, u_amplitude);
+    else if (u_pattern_index == 41) intensity = pattern_magic_particles(uv, u_time, u_amplitude);
 
     vec3 bg = vec3(0.0, 0.0, 0.05);
     vec3 color = u_base_color * intensity * 1.5;

@@ -16,10 +16,12 @@ import config
 from renderer import Renderer
 from audio_handler import AudioHandler
 from gui import GUI
+from midi_handler import MidiHandler
 import sys
 import traceback
 from typing import Dict, Any
 import random
+import math
 
 # ============================================================================
 # FUNCIONES DE INICIALIZACIÓN Y LÓGICA
@@ -80,10 +82,159 @@ def initialize_state(pattern_mode: str, initial_pattern: int = 0) -> Dict[str, A
         
         # === ESTADÍSTICAS ===
         'frames_rendered': 0,
+
+        # === MIDI ===
+        'midi_gain_left': 1.0,
+        'midi_gain_right': 1.0,
+        'midi_filter_lpf_left': 0.0,
+        'midi_filter_hpf_left': 0.0,
+        'midi_filter_lpf_right': 0.0,
+        'midi_filter_hpf_right': 0.0,
+        'midi_auto_pattern': True,
+        'midi_color_lock': False,
+        'midi_locked_color': 0,
+        'midi_fx_glitch_until': 0.0,
+        'midi_fx_strobe_until': 0.0,
+        'midi_fx_flash_until': 0.0,
+        'midi_last_glitch_time': 0.0,
+        'midi_pattern_override_time': 0.0,
+        'midi_hotcue_fx': None,
+        'midi_hotcue_fx_start': 0.0,
+        'midi_hotcue_fx_until': 0.0,
+        'midi_hotcue_fx_seed': 0.0,
+
+        # === RENDER OVERRIDES ===
+        'render_bloom': config.BLOOM_INTENSITY,
+        'render_vignette': config.VIGNETTE_INTENSITY,
+        'render_contrast': config.CONTRAST,
+        'render_saturation': config.SATURATION,
+        'render_base_color': None,
+        'render_zoom': 1.0,
     }
     # Establece el primer objetivo de beats
     state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
     return state
+
+def _clamp(value: float, min_value: float, max_value: float) -> float:
+    return max(min_value, min(max_value, value))
+
+def apply_midi_modifiers(state: Dict[str, Any]) -> None:
+    """
+    Aplica la influencia MIDI al estado antes de renderizar.
+    """
+    gain_left = _clamp(state.get('midi_gain_left', 1.0), 0.0, 1.0)
+    gain_right = _clamp(state.get('midi_gain_right', 1.0), 0.0, 1.0)
+
+    # Escala de intensidad general
+    state['current_amplitude'] *= gain_left
+    state['smoothed_amplitude'] *= gain_left
+
+    # Escala por bandas
+    state['bass_energy'] *= gain_left
+    state['mid_energy'] *= (gain_left * 0.7 + gain_right * 0.3)
+    state['treble_energy'] *= gain_right
+
+    left_weight = gain_left + 1e-6
+    right_weight = gain_right + 1e-6
+    weight_sum = left_weight + right_weight
+
+    lpf = (
+        state.get('midi_filter_lpf_left', 0.0) * left_weight +
+        state.get('midi_filter_lpf_right', 0.0) * right_weight
+    ) / weight_sum
+    hpf = (
+        state.get('midi_filter_hpf_left', 0.0) * left_weight +
+        state.get('midi_filter_hpf_right', 0.0) * right_weight
+    ) / weight_sum
+
+    # Filtro fuerte: LPF = mas suave/oscuro, HPF = mas nitido/contrastado
+    state['treble_energy'] *= (1.0 - 0.85 * lpf) * (1.0 + 0.6 * hpf)
+    state['mid_energy'] *= (1.0 - 0.5 * lpf) * (1.0 + 0.3 * hpf)
+    state['bass_energy'] *= (1.0 + 0.3 * lpf) * (1.0 - 0.2 * hpf)
+
+    bloom = config.BLOOM_INTENSITY + gain_right * 0.4 + hpf * 0.2
+    vignette = config.VIGNETTE_INTENSITY + lpf * 0.65
+    contrast = config.CONTRAST + hpf * 1.1 - lpf * 0.8
+    saturation = config.SATURATION + hpf * 1.0 - lpf * 0.8
+
+    current_time = state['current_time']
+    flicker_amount = max(lpf, hpf)
+    state['render_base_color'] = None
+    if flicker_amount > 0.01:
+        # Curva suave: poco al inicio, mucho al final
+        flicker_curve = flicker_amount * flicker_amount
+        flicker_rate = 1.5 + flicker_curve * 20.0
+        flicker = (1.0 + math.sin(current_time * flicker_rate * 6.28318)) * 0.5
+        flash_strength = 0.15 + flicker_curve * 1.6
+        flash_gate = 0.75 - flicker_curve * 0.45
+        if flicker > flash_gate:
+            # White flash overlay driven by filter position
+            state['render_base_color'] = (1.0, 1.0, 1.0)
+            bloom += flash_strength * 0.9
+            contrast += flash_strength * 0.6
+        else:
+            bloom += flash_strength * 0.15
+
+    # FX: glitch
+    if current_time < state.get('midi_fx_glitch_until', 0.0):
+        if current_time - state.get('midi_last_glitch_time', 0.0) > 0.08:
+            state['color_index'] = random.randint(0, len(config.COLOR_PALETTE) - 1)
+            state['midi_last_glitch_time'] = current_time
+        contrast += 0.3
+        bloom += 0.2
+
+    # FX: strobe
+    if current_time < state.get('midi_fx_strobe_until', 0.0):
+        if int(current_time * 15) % 2 == 0:
+            state['current_amplitude'] *= 1.8
+            state['smoothed_amplitude'] *= 1.4
+            state['beat_intensity'] = max(state.get('beat_intensity', 0.0), 1.5)
+            bloom += 0.4
+            contrast += 0.4
+        else:
+            state['current_amplitude'] *= 0.4
+            state['smoothed_amplitude'] *= 0.6
+
+    # FX: flash
+    if current_time < state.get('midi_fx_flash_until', 0.0):
+        bloom += 0.6
+        contrast += 0.4
+        saturation += 0.4
+
+    # FX: hotcue random
+    if current_time < state.get('midi_hotcue_fx_until', 0.0):
+        fx_type = state.get('midi_hotcue_fx')
+        fx_seed = state.get('midi_hotcue_fx_seed', 0.0)
+        fx_start = state.get('midi_hotcue_fx_start', current_time)
+        fx_until = state.get('midi_hotcue_fx_until', current_time)
+        fx_duration = max(fx_until - fx_start, 0.05)
+        fx_progress = _clamp((current_time - fx_start) / fx_duration, 0.0, 1.0)
+        fx_intensity = 1.0 - fx_progress
+
+        # Parpadeo frenético de color (siempre activo en hotcue)
+        flicker_rate = 10.0 + fx_intensity * 22.0
+        flicker = (1.0 + math.sin(current_time * flicker_rate * 6.28318 + fx_seed * 6.0)) * 0.5
+        if flicker > 0.25:
+            state['color_index'] = random.randint(0, len(config.COLOR_PALETTE) - 1)
+        bloom += 0.4 * fx_intensity * flicker
+        contrast += 0.3 * fx_intensity * flicker
+
+        if fx_type in ('zoom_in', 'zoom_out'):
+            zoom_curve = 1.0 - abs(2.0 * fx_progress - 1.0)
+            zoom_peak = 1.35 if fx_type == 'zoom_in' else 0.75
+            state['render_zoom'] = 1.0 + (zoom_peak - 1.0) * zoom_curve
+            bloom += 0.25 * fx_intensity
+            contrast += 0.2 * fx_intensity
+
+    # Bloqueo de color
+    if state.get('midi_color_lock', False):
+        state['color_index'] = state.get('midi_locked_color', state['color_index'])
+
+    state['render_bloom'] = _clamp(bloom, 0.0, 2.0)
+    state['render_vignette'] = _clamp(vignette, 0.0, 1.0)
+    state['render_contrast'] = _clamp(contrast, 0.3, 2.0)
+    state['render_saturation'] = _clamp(saturation, 0.0, 2.0)
+    state['render_zoom'] = _clamp(state.get('render_zoom', 1.0), 0.6, 1.6)
 
 def print_welcome_message():
     """Imprime mensaje de bienvenida con información del programa."""
@@ -190,6 +341,9 @@ def main():
         
         # Inicializar estado (pasa el modo y el índice inicial elegido)
         state = initialize_state(current_pattern_mode, admin_pattern_index)
+
+        # Inicializar MIDI (si el puerto virtual esta disponible)
+        midi_handler = MidiHandler()
         
         if current_pattern_mode != 'admin':
             print(f"🔥 Modo de cambio: '{state['pattern_mode']}'. Próximo cambio en {state['current_beat_target']} beats.")
@@ -274,9 +428,15 @@ def main():
             
             # 2. ACTUALIZACIÓN DEL TIEMPO
             state['current_time'] = (pygame.time.get_ticks() - start_time) / 1000.0
+
+            # 2.1 PROCESAMIENTO MIDI
+            midi_handler.poll(state, state['current_time'])
             
             # 3. PROCESAMIENTO DE AUDIO
             audio_handler.process_audio(state)
+
+            # 3.1 APLICAR MODIFICADORES MIDI
+            apply_midi_modifiers(state)
             
             # Si la ventana está minimizada, no renderizar (ahorra recursos)
             if minimized:
@@ -286,7 +446,10 @@ def main():
             # --- LÓGICA DE CAMBIO DE PATRÓN AUTOMÁTICO ---
             # (Se salta si estamos en modo admin)
             if state['pattern_mode'] != 'admin':
-                if state['beat_count'] >= state['current_beat_target']:
+                override_age = state['current_time'] - state.get('midi_pattern_override_time', 0.0)
+                if (state.get('midi_auto_pattern', True) and
+                    override_age > 0.1 and
+                    state['beat_count'] >= state['current_beat_target']):
                     state['beat_count'] = 0
                     state['pattern_change_time'] = state['current_time']
                     state['prev_pattern_index'] = state['pattern_index']
@@ -325,6 +488,7 @@ def main():
         # ================================================================
         print("\n🧹 Limpiando recursos...")
         audio_handler.stop_stream()
+        midi_handler.close()
         renderer.close()
         
         print(f"\n📊 ESTADÍSTICAS FINALES:")

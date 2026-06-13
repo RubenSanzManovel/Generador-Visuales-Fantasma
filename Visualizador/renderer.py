@@ -415,7 +415,10 @@ class Renderer:
             
             # Color base actual
             u_base_color = glGetUniformLocation(self.shader_program, "u_base_color")
-            glUniform3fv(u_base_color, 1, config.COLOR_PALETTE[state['color_index']])
+            base_color = state.get('render_base_color')
+            if base_color is None:
+                base_color = config.COLOR_PALETTE[state['color_index']]
+            glUniform3fv(u_base_color, 1, base_color)
             
             # Índices de patrones (actual y anterior para transición)
             u_pattern = glGetUniformLocation(self.shader_program, "u_pattern_index")
@@ -431,6 +434,9 @@ class Renderer:
             # Intensidad del último beat
             u_beat_intensity = glGetUniformLocation(self.shader_program, "u_beat_intensity")
             glUniform1f(u_beat_intensity, state.get('beat_intensity', 0.0))
+
+            u_last_beat_time = glGetUniformLocation(self.shader_program, "u_last_beat_time")
+            glUniform1f(u_last_beat_time, state.get('beat_last_time', 0.0))
             
             # Posiciones y tiempos de partículas/gotas
             u_drops_pos = glGetUniformLocation(self.shader_program, "u_drops_pos")
@@ -441,16 +447,19 @@ class Renderer:
             
             # Post-processing uniforms
             u_bloom = glGetUniformLocation(self.shader_program, "u_bloom_intensity")
-            glUniform1f(u_bloom, config.BLOOM_INTENSITY)
+            glUniform1f(u_bloom, state.get('render_bloom', config.BLOOM_INTENSITY))
             
             u_vignette = glGetUniformLocation(self.shader_program, "u_vignette_intensity")
-            glUniform1f(u_vignette, config.VIGNETTE_INTENSITY)
+            glUniform1f(u_vignette, state.get('render_vignette', config.VIGNETTE_INTENSITY))
             
             u_contrast = glGetUniformLocation(self.shader_program, "u_contrast")
-            glUniform1f(u_contrast, config.CONTRAST)
+            glUniform1f(u_contrast, state.get('render_contrast', config.CONTRAST))
             
             u_saturation = glGetUniformLocation(self.shader_program, "u_saturation")
-            glUniform1f(u_saturation, config.SATURATION)
+            glUniform1f(u_saturation, state.get('render_saturation', config.SATURATION))
+
+            u_zoom = glGetUniformLocation(self.shader_program, "u_zoom")
+            glUniform1f(u_zoom, state.get('render_zoom', 1.0))
             
             # ================================================================
             # DIBUJAR GEOMETRÍA

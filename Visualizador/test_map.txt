@@ -1,0 +1,24 @@
+Play Izq - 90 0B 7F
+Cue Izq - 90 0C 7F
+Play Der - 91 0B 7F
+Cue Der - 91 0C 7F
+HotCue Izq 1 - 97 00 7F
+HotCue Izq 2 - 97 01 7F
+HotCue Izq 3 - 97 02 7F
+HotCue Izq 4 - 97 03 7F
+HotCue Der 1 - 98 00 7F
+HotCue Der 2 - 98 01 7F
+HotCue Der 3 - 98 02 7F
+HotCue Der 4 - 98 03 7F
+Volumen Izq - B0 13 pp (pp significa que puede tener cualquier valor de 00 a 7F "menor a mayor")
+Volumen Der - B1 13 pp
+Filter Izq - B6 17 pp (Punto medio pp=40 hacia inferiores es LPF y hacia superiores HPF)
+Filter Der - B6 18 pp (Igual)
+AutoLoop Izq 1 - 97 10 7F
+AutoLoop Izq 2 - 97 11 7F
+AutoLoop Izq 4 - 97 12 7F
+AutoLoop Izq 8 - 97 13 7F
+AutoLoop Der 1 - 98 10 7F
+AutoLoop Der 2 - 98 11 7F
+AutoLoop Der 4 - 98 12 7F
+AutoLoop Der 8 - 98 13 7F

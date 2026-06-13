@@ -25,6 +25,8 @@ class AudioHandler:
         self.audio_queue: queue.Queue = queue.Queue(maxsize=10)
         self.device_id: Optional[int] = self._find_loopback_device()
         self.stream: Optional[sd.InputStream] = None
+        self.stream_samplerate: int = config.SAMPLERATE
+        self.use_wasapi_loopback: bool = config.USE_WASAPI_LOOPBACK
         
         self.amplitude_buffer: deque = deque(maxlen=config.AUDIO_SMOOTHING_FRAMES)
         self.bass_buffer: deque = deque(maxlen=config.AUDIO_SMOOTHING_FRAMES)
@@ -42,30 +44,111 @@ class AudioHandler:
         """
         Busca el dispositivo de captura de audio especificado en config.
         """
+        if config.USE_WASAPI_LOOPBACK:
+            return self._find_wasapi_loopback_device()
+
         try:
             devices = sd.query_devices()
+
+            if config.DEVICE_ID is not None:
+                if 0 <= config.DEVICE_ID < len(devices):
+                    device_dict = devices[config.DEVICE_ID]  # type: ignore
+                    if device_dict.get('max_input_channels', 0) > 0:
+                        print(f"✅ Usando dispositivo por ID: {device_dict.get('name', 'Unknown')} (ID: {config.DEVICE_ID})")
+                        return int(config.DEVICE_ID)
+                    print(f"⚠️  El dispositivo ID {config.DEVICE_ID} no tiene entrada de audio")
+                else:
+                    print(f"⚠️  El dispositivo ID {config.DEVICE_ID} no existe")
+                return None
             
+            matches = []
+            target_name = config.DEVICE_NAME.lower()
             for i, device in enumerate(devices):
                 device_dict = device  # type: ignore
-                if config.DEVICE_NAME in str(device_dict.get('name', '')) and device_dict.get('max_input_channels', 0) > 0:
-                    print(f"✅ Dispositivo de audio encontrado: '{device_dict['name']}' (ID: {i})")
-                    print(f"   Canales: {device_dict.get('max_input_channels', 0)}, "
-                          f"Sample Rate: {device_dict.get('default_samplerate', 0)} Hz")
-                    return i
+                device_name = str(device_dict.get('name', ''))
+                if target_name in device_name.lower() and device_dict.get('max_input_channels', 0) > 0:
+                    matches.append((i, device_dict))
+
+            if matches:
+                # Elegir el match con mayor sample rate por defecto
+                best_id, best_device = max(
+                    matches,
+                    key=lambda item: float(item[1].get('default_samplerate', 0) or 0)
+                )
+                print(f"✅ Dispositivo de audio encontrado: '{best_device.get('name', 'Unknown')}' (ID: {best_id})")
+                print(f"   Canales: {best_device.get('max_input_channels', 0)}, "
+                      f"Sample Rate: {best_device.get('default_samplerate', 0)} Hz")
+                if len(matches) > 1:
+                    print(f"   Nota: {len(matches)} coincidencias encontradas, se eligio la de mayor sample rate")
+                return int(best_id)
             
             print(f"⚠️  No se encontró '{config.DEVICE_NAME}'. Intentando dispositivo predeterminado.")
-            default_device_tuple = sd.default.device  # type: ignore
-            if default_device_tuple and len(default_device_tuple) > 0:
-                default_device = default_device_tuple[0] if isinstance(default_device_tuple, (list, tuple)) else default_device_tuple
-                if default_device is not None:
-                    print(f"   Usando dispositivo predeterminado (ID: {default_device})")
-                    return int(default_device)
+            default_device_pair = sd.default.device  # type: ignore
+            if default_device_pair is not None:
+                if isinstance(default_device_pair, (list, tuple)):
+                    default_input = default_device_pair[0] if len(default_device_pair) > 0 else None
+                else:
+                    default_input = default_device_pair
+                if default_input is not None:
+                    print(f"   Usando dispositivo predeterminado (ID: {default_input})")
+                    return int(default_input)
             
             print("❌ No hay dispositivos de entrada disponibles")
             return None
-            
         except Exception as e:
             print(f"❌ Error buscando dispositivos de audio: {e}")
+            return None
+
+    def _find_wasapi_loopback_device(self) -> Optional[int]:
+        """
+        Busca un dispositivo de salida WASAPI para capturar en modo loopback.
+        """
+        try:
+            devices = sd.query_devices()
+            hostapis = sd.query_hostapis()
+
+            def is_wasapi(device_dict: Dict[str, Any]) -> bool:
+                hostapi_index = int(device_dict.get('hostapi', -1) or -1)
+                if 0 <= hostapi_index < len(hostapis):
+                    hostapi_name = str(hostapis[hostapi_index].get('name', ''))
+                    return 'WASAPI' in hostapi_name.upper()
+                return False
+
+            if config.OUTPUT_DEVICE_ID is not None:
+                if 0 <= config.OUTPUT_DEVICE_ID < len(devices):
+                    device_dict = devices[config.OUTPUT_DEVICE_ID]  # type: ignore
+                    if device_dict.get('max_output_channels', 0) > 0 and is_wasapi(device_dict):
+                        print(f"✅ Usando salida WASAPI por ID: {device_dict.get('name', 'Unknown')} (ID: {config.OUTPUT_DEVICE_ID})")
+                        return int(config.OUTPUT_DEVICE_ID)
+                    print(f"⚠️  El dispositivo ID {config.OUTPUT_DEVICE_ID} no es salida WASAPI valida")
+                else:
+                    print(f"⚠️  El dispositivo ID {config.OUTPUT_DEVICE_ID} no existe")
+                return None
+
+            target_name = (config.OUTPUT_DEVICE_NAME or '').lower()
+            matches = []
+            for i, device in enumerate(devices):
+                device_dict = device  # type: ignore
+                device_name = str(device_dict.get('name', ''))
+                if target_name and target_name in device_name.lower():
+                    if device_dict.get('max_output_channels', 0) > 0 and is_wasapi(device_dict):
+                        matches.append((i, device_dict))
+
+            if matches:
+                best_id, best_device = max(
+                    matches,
+                    key=lambda item: float(item[1].get('default_samplerate', 0) or 0)
+                )
+                print(f"✅ Salida WASAPI encontrada: '{best_device.get('name', 'Unknown')}' (ID: {best_id})")
+                print(f"   Canales: {best_device.get('max_output_channels', 0)}, "
+                      f"Sample Rate: {best_device.get('default_samplerate', 0)} Hz")
+                return int(best_id)
+
+            print("⚠️  No se encontro salida WASAPI. Desactiva USE_WASAPI_LOOPBACK o define OUTPUT_DEVICE_NAME/ID.")
+            return None
+
+        except Exception as e:
+            print(f"❌ Error buscando salida WASAPI: {e}")
             return None
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time: Any, status: sd.CallbackFlags) -> None:
@@ -95,14 +178,68 @@ class AudioHandler:
             return False
         
         try:
-            self.stream = sd.InputStream(
-                device=self.device_id,
-                channels=1,
-                samplerate=config.SAMPLERATE,
-                blocksize=config.NUM_SAMPLES,
-                callback=self._audio_callback,
-                dtype=np.float32
-            )
+            if self.use_wasapi_loopback:
+                device_info = sd.query_devices(self.device_id, 'output')  # type: ignore
+            else:
+                device_info = sd.query_devices(self.device_id, 'input')  # type: ignore
+            default_sr = int(device_info.get('default_samplerate', 0) or 0)
+            if config.USE_DEVICE_DEFAULT_SAMPLERATE and default_sr > 0:
+                self.stream_samplerate = default_sr
+            else:
+                self.stream_samplerate = config.SAMPLERATE
+
+            if self.stream_samplerate != config.SAMPLERATE:
+                print(f"⚙️  Usando sample rate del dispositivo: {self.stream_samplerate} Hz")
+
+            stream_channels = 1
+            if self.use_wasapi_loopback:
+                max_channels = int(device_info.get('max_output_channels', 2) or 2)
+                stream_channels = max(1, min(2, max_channels))
+
+            extra_settings = None
+            loopback_enabled = False
+            if self.use_wasapi_loopback:
+                try:
+                    extra_settings = sd.WasapiSettings(loopback=True)
+                    loopback_enabled = True
+                except TypeError:
+                    extra_settings = sd.WasapiSettings()
+                    try:
+                        extra_settings.loopback = True
+                        loopback_enabled = True
+                    except Exception:
+                        extra_settings = None
+                if loopback_enabled:
+                    print("🎧 Modo loopback WASAPI activo")
+                else:
+                    print("❌ Loopback WASAPI no soportado por esta version de sounddevice")
+                    return False
+
+            try:
+                self.stream = sd.InputStream(
+                    device=self.device_id,
+                    channels=stream_channels,
+                    samplerate=self.stream_samplerate,
+                    blocksize=config.NUM_SAMPLES,
+                    callback=self._audio_callback,
+                    dtype=np.float32,
+                    extra_settings=extra_settings
+                )
+            except Exception as e:
+                if self.use_wasapi_loopback and stream_channels > 1:
+                    print(f"⚠️  Error con {stream_channels} canales, intentando 1 canal: {e}")
+                    stream_channels = 1
+                    self.stream = sd.InputStream(
+                        device=self.device_id,
+                        channels=stream_channels,
+                        samplerate=self.stream_samplerate,
+                        blocksize=config.NUM_SAMPLES,
+                        callback=self._audio_callback,
+                        dtype=np.float32,
+                        extra_settings=extra_settings
+                    )
+                else:
+                    raise
             self.stream.start()
             print("=" * 70)
             print("🎵 VISUALIZADOR EN MARCHA - Reproduce música para ver los efectos")
@@ -162,7 +299,7 @@ class AudioHandler:
             # ANÁLISIS FFT
             windowed_data = data * self.hann_window
             fft_data = np.abs(np.fft.rfft(windowed_data))
-            fft_freqs = np.fft.rfftfreq(len(data), 1.0 / config.SAMPLERATE)
+            fft_freqs = np.fft.rfftfreq(len(data), 1.0 / self.stream_samplerate)
             
             # ANÁLISIS POR BANDAS
             bass_energy = self._calculate_band_energy(fft_data, fft_freqs, config.BASS_FREQ_RANGE)
