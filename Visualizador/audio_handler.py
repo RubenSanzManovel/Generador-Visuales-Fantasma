@@ -23,10 +23,17 @@ class AudioHandler:
     def __init__(self):
         """Inicializa el manejador de audio y encuentra el dispositivo de captura."""
         self.audio_queue: queue.Queue = queue.Queue(maxsize=10)
-        self.device_id: Optional[int] = self._find_loopback_device()
+        self.use_wasapi_loopback: bool = config.USE_WASAPI_LOOPBACK
+        
+        # 1. Intentar autodetectar dispositivo con señal de audio activa
+        self.device_id: Optional[int] = self._auto_detect_active_device()
+        
+        # 2. Si no hay señal activa, usar configuración clásica de config.py
+        if self.device_id is None:
+            self.device_id = self._find_loopback_device()
+            
         self.stream: Optional[sd.InputStream] = None
         self.stream_samplerate: int = config.SAMPLERATE
-        self.use_wasapi_loopback: bool = config.USE_WASAPI_LOOPBACK
         
         self.amplitude_buffer: deque = deque(maxlen=config.AUDIO_SMOOTHING_FRAMES)
         self.bass_buffer: deque = deque(maxlen=config.AUDIO_SMOOTHING_FRAMES)
@@ -39,6 +46,131 @@ class AudioHandler:
         self.frames_processed: int = 0
         
         print("🎵 AudioHandler inicializado correctamente")
+
+    def _auto_detect_active_device(self) -> Optional[int]:
+        """
+        Escanea los dispositivos de audio disponibles y selecciona automáticamente
+        el que esté recibiendo señal de audio activa (música o sonido del sistema).
+        """
+        print("[*] Buscando canal de audio activo (reproduce música/sonido)...")
+        try:
+            devices = sd.query_devices()
+        except Exception as e:
+            print(f"⚠️ No se pudieron listar los dispositivos de audio: {e}")
+            return None
+            
+        candidates = []
+        
+        # 1. Entrada predeterminada
+        try:
+            default_in = sd.default.device[0]
+            if default_in is not None and default_in >= 0:
+                candidates.append((int(default_in), False, "Entrada Predeterminada"))
+        except Exception:
+            pass
+            
+        # 2. Mezclas estéreo y cables virtuales
+        for i, dev in enumerate(devices):
+            name = dev.get('name', '').lower()
+            if dev.get('max_input_channels', 0) > 0:
+                if any(x in name for x in ["mezcla", "stereo mix", "cable", "wave", "loopback", "sb2"]):
+                    candidates.append((i, False, f"Entrada: {dev.get('name')[:40]}"))
+                else:
+                    candidates.append((i, False, f"Mic/Entrada: {dev.get('name')[:40]}"))
+                    
+        # 3. Dispositivos de salida en modo WASAPI Loopback (Windows)
+        if sys.platform == 'win32':
+            try:
+                hostapis = sd.query_hostapis()
+                for i, dev in enumerate(devices):
+                    hostapi_idx = dev.get('hostapi', -1)
+                    is_wasapi = False
+                    if 0 <= hostapi_idx < len(hostapis):
+                        is_wasapi = 'WASAPI' in hostapis[hostapi_idx].get('name', '').upper()
+                    
+                    if dev.get('max_output_channels', 0) > 0 and is_wasapi:
+                        name = dev.get('name', '').lower()
+                        if any(x in name for x in ["altavoz", "speaker", "auricular", "headphone", "flight", "sb2", "cable"]):
+                            candidates.append((i, True, f"Loopback: {dev.get('name')[:40]}"))
+                        else:
+                            candidates.append((i, True, f"Loopback Aux: {dev.get('name')[:40]}"))
+            except Exception as e:
+                print(f"⚠️ Error buscando salidas WASAPI: {e}")
+
+        # Eliminar duplicados
+        seen = set()
+        unique_candidates = []
+        for dev_id, is_loopback, desc in candidates:
+            key = (dev_id, is_loopback)
+            if key not in seen:
+                seen.add(key)
+                unique_candidates.append((dev_id, is_loopback, desc))
+
+        best_device_id = None
+        best_is_loopback = False
+        max_volume = 0.0015  # Umbral mínimo para descartar el ruido estático de micrófonos vacíos
+        
+        import time
+        for dev_id, is_loopback, desc in unique_candidates:
+            test_queue = queue.Queue()
+            
+            def test_callback(indata, frames, time_info, status):
+                mono = indata[:, 0]
+                rms = float(np.sqrt(np.mean(mono**2)))
+                test_queue.put(rms)
+
+            channels = 1
+            if is_loopback:
+                try:
+                    dev_info = sd.query_devices(dev_id, 'output')
+                    max_ch = int(dev_info.get('max_output_channels', 2) or 2)
+                    channels = max(1, min(2, max_ch))
+                    extra_settings = sd.WasapiSettings(loopback=True)
+                except Exception:
+                    continue
+            else:
+                try:
+                    dev_info = sd.query_devices(dev_id, 'input')
+                    max_ch = int(dev_info.get('max_input_channels', 1) or 1)
+                    channels = max(1, min(2, max_ch))
+                    extra_settings = None
+                except Exception:
+                    continue
+
+            try:
+                # Inicializar capturador de prueba muy veloz (80ms)
+                stream = sd.InputStream(
+                    device=dev_id,
+                    channels=channels,
+                    samplerate=int(dev_info.get('default_samplerate', 44100)),
+                    blocksize=512,
+                    callback=test_callback,
+                    dtype=np.float32,
+                    extra_settings=extra_settings
+                )
+                with stream:
+                    time.sleep(0.08)
+                
+                volumes = []
+                while not test_queue.empty():
+                    volumes.append(test_queue.get())
+                avg_vol = float(np.mean(volumes)) if volumes else 0.0
+                
+                if avg_vol > max_volume:
+                    max_volume = avg_vol
+                    best_device_id = dev_id
+                    best_is_loopback = is_loopback
+            except Exception:
+                continue
+
+        if best_device_id is not None:
+            config.USE_WASAPI_LOOPBACK = best_is_loopback
+            self.use_wasapi_loopback = best_is_loopback
+            print(f"   [+] Canal activo detectado: ID {best_device_id} ({'Loopback' if best_is_loopback else 'Entrada'}) con señal de {max_volume:.4f}")
+            return best_device_id
+            
+        print("   [-] No se detectó ninguna fuente de audio sonando.")
+        return None
 
     def _find_loopback_device(self) -> Optional[int]:
         """
@@ -332,12 +464,20 @@ class AudioHandler:
                 
                 state['color_index'] = (state['color_index'] + 1) % len(config.COLOR_PALETTE)
                 
-                for i in range(config.RAYS_PER_BEAT):
-                    idx = (state['drop_index'] + i) % config.MAX_PARTICLES
-                    state['drop_positions'][idx] = np.random.rand(2).astype(np.float32)
-                    state['drop_times'][idx] = state['current_time']
+                # El número de chispas/partículas generadas por beat se escala dinámicamente con el High EQ (efecto espejo con reposo en 0.5)
+                midi_high_left = state.get('midi_high_left', 0.5)
+                midi_high_right = state.get('midi_high_right', 0.5)
+                midi_high = (midi_high_left + midi_high_right) * 0.5
                 
-                state['drop_index'] = (state['drop_index'] + config.RAYS_PER_BEAT) % config.MAX_PARTICLES
+                high_diff = abs(midi_high - 0.5) * 2.0
+                num_particles = int(config.RAYS_PER_BEAT * (1.0 + high_diff * 3.0)) # 0.5 -> 8 partículas | 0.0 o 1.0 -> 32 partículas
+                
+                if num_particles > 0:
+                    for i in range(num_particles):
+                        idx = (state['drop_index'] + i) % config.MAX_PARTICLES
+                        state['drop_positions'][idx] = np.random.rand(2).astype(np.float32)
+                        state['drop_times'][idx] = state['current_time']
+                    state['drop_index'] = (state['drop_index'] + num_particles) % config.MAX_PARTICLES
                 
                 # --- LA LÓGICA DE CAMBIO DE PATRÓN SE HA MOVIDO A MAIN.PY ---
             
@@ -348,16 +488,27 @@ class AudioHandler:
             self.amplitude_buffer.append(state['current_amplitude'])
             state['smoothed_amplitude'] = np.mean(self.amplitude_buffer) if self.amplitude_buffer else 0.0
             
+            # Decaer la intensidad del beat de forma exponencial en cada ciclo
+            state['beat_intensity'] = state.get('beat_intensity', 0.0) * 0.85
+            
+            # Guardar el espectro FFT completo para uso en los shaders
+            state['fft_data'] = fft_data
+            
         except queue.Empty:
             # No hay datos de audio
             state['current_amplitude'] *= config.DECAY_RATE
             state['smoothed_amplitude'] *= config.DECAY_RATE
+            state['beat_intensity'] = state.get('beat_intensity', 0.0) * config.DECAY_RATE
             
             if 'bass_energy' in state:
                 state['bass_energy'] *= config.DECAY_RATE
                 state['mid_energy'] *= config.DECAY_RATE
                 state['treble_energy'] *= config.DECAY_RATE
+            if 'fft_data' in state:
+                state['fft_data'] *= config.DECAY_RATE
         
         except Exception as e:
             print(f"❌ Error procesando audio: {e}", file=sys.stderr)
             state['current_amplitude'] *= config.DECAY_RATE
+            if 'fft_data' in state:
+                state['fft_data'] *= config.DECAY_RATE

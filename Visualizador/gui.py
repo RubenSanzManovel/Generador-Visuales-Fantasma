@@ -62,25 +62,33 @@ class GUI:
         """Inicializa la GUI"""
         pygame.init()
         
-        # Obtener resolución de pantalla completa
-        display_info = pygame.display.Info()
-        self.screen_width = display_info.current_w
-        self.screen_height = display_info.current_h
-        
-        # Crear ventana maximizada sin bordes (mejor que FULLSCREEN para alt+tab)
-        self.screen = pygame.display.set_mode(
-            (self.screen_width, self.screen_height),
-            pygame.NOFRAME
-        )
+        # Configurar DPI awareness para Windows para que detecte la resolución física nativa real
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+                
+        try:
+            # Ventana sin bordes (NOFRAME) para evitar que Windows minimice la app al perder foco (ej. escribir en el chat)
+            self.screen = pygame.display.set_mode((0, 0), pygame.NOFRAME)
+        except pygame.error as e:
+            print(f"[!] No se pudo iniciar la GUI en modo sin bordes: {e}. Probando modo ventana...")
+            self.screen = pygame.display.set_mode((1280, 720))
+            
+        self.screen_width, self.screen_height = self.screen.get_size()
         pygame.display.set_caption("Visualizador de Música")
         
         # Mantener cursor visible en la GUI
         pygame.mouse.set_visible(True)
         
-        # Fuentes
-        self.title_font = pygame.font.Font(None, 100)
-        self.button_font = pygame.font.Font(None, 50)
-        self.info_font = pygame.font.Font(None, 35)
+        # Fuentes proporcionales al alto de la pantalla actual
+        self.title_font = pygame.font.Font(None, int(self.screen_height * 0.092))
+        self.button_font = pygame.font.Font(None, int(self.screen_height * 0.046))
+        self.info_font = pygame.font.Font(None, int(self.screen_height * 0.032))
         
         # Estado
         self.selected_mode: Optional[str] = None
@@ -109,9 +117,13 @@ class GUI:
         # Calcular posiciones centradas
         center_x = self.screen_width // 2
         center_y = self.screen_height // 2
-        button_width = 400
-        button_height = 80
-        spacing = 100
+        
+        # Dimensiones de botones escaladas proporcionalmente
+        button_width = int(self.screen_width * 0.208)  # ~400 en 1920
+        button_width = max(300, min(500, button_width))
+        button_height = int(self.screen_height * 0.074) # ~80 en 1080
+        button_height = max(50, min(100, button_height))
+        spacing = int(self.screen_height * 0.092)       # ~100 en 1080
         
         # Crear botones
         buttons = [
@@ -132,9 +144,6 @@ class GUI:
         clock = pygame.time.Clock()
         running = True
         
-        # Animar el fondo
-        time_offset = 0
-        
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -145,9 +154,7 @@ class GUI:
                         return {'mode': 'exit'}
                 
                 # Prevenir bloqueos al cambiar ventanas
-                if event.type == pygame.WINDOWFOCUSGAINED:
-                    pass
-                elif event.type == pygame.WINDOWFOCUSLOST:
+                if event.type in (pygame.WINDOWFOCUSGAINED, pygame.WINDOWFOCUSLOST):
                     pass
                 
                 # Manejar clics en botones
@@ -161,8 +168,6 @@ class GUI:
                             return {'mode': 'random', 'pattern': 0, 'beats': 0}
                         elif i == 3:  # SALIR
                             return {'mode': 'exit'}
-            
-            time_offset += 0.01
             
             # Dibujar
             self.screen.blit(self.bg_gradient, (0, 0))
@@ -187,23 +192,28 @@ class GUI:
         return {'mode': 'exit'}
     
     def _show_admin_menu(self) -> Dict:
-        """Menú para seleccionar patrón específico en modo admin"""
+        """Menú para seleccionar patrón específico en modo admin con soporte de scrollbar y rueda del mouse"""
         center_x = self.screen_width // 2
-        center_y = self.screen_height // 2
         
-        # Crear botones de patrones en grid - ajustado para que quepa todo
+        # Crear botones de patrones en grid escalados dinámicamente
         patterns_per_row = 8
-        button_size = 90
-        spacing = 15
+        button_size = int(self.screen_height * 0.083) # ~90 en 1080
+        spacing = int(self.screen_height * 0.014)     # ~15 en 1080
         total_rows = (config.TOTAL_PATTERNS + patterns_per_row - 1) // patterns_per_row
         
         # Calcular tamaño del grid
         grid_width = patterns_per_row * (button_size + spacing) - spacing
-        grid_height = total_rows * (button_size + spacing) - spacing
+        content_height = total_rows * (button_size + spacing) - spacing
         
-        # Centrar el grid verticalmente considerando el título
+        # Centrar el grid horizontalmente
         start_x = center_x - grid_width // 2
-        start_y = 220  # Espacio desde arriba para el título
+        start_y = int(self.screen_height * 0.204)     # ~220 en 1080
+        
+        # Viewport visible
+        viewport_top = int(self.screen_height * 0.194) # ~210 en 1080
+        viewport_height = self.screen_height - viewport_top - int(self.screen_height * 0.139) # ~150 desde abajo en 1080
+        viewport_bottom = viewport_top + viewport_height
+        visible_height = viewport_height
         
         buttons = []
         for i in range(config.TOTAL_PATTERNS):
@@ -215,14 +225,43 @@ class GUI:
                         (80, 80, 120), (120, 120, 180))
             buttons.append(btn)
         
-        # Botón volver
-        back_button = Button(50, self.screen_height - 120, 200, 70, "← VOLVER", 
-                            (80, 80, 80), (120, 120, 120))
+        # Configuración del Slider/Scrollbar
+        scroll_y = 0.0
+        max_scroll_y = float(max(0, content_height - visible_height))
+        dragging_slider = False
+        drag_offset_y = 0
+        
+        slider_x = min(self.screen_width - int(self.screen_width * 0.018), start_x + grid_width + int(self.screen_width * 0.015))
+        slider_y = viewport_top
+        slider_height = viewport_height
+        slider_width = 15
+        
+        # Botón volver escalado
+        back_btn_w = int(self.screen_width * 0.104) # ~200 en 1920
+        back_btn_h = int(self.screen_height * 0.065) # ~70 en 1080
+        back_button = Button(int(self.screen_width * 0.026), self.screen_height - back_btn_h - int(self.screen_height * 0.046), 
+                             back_btn_w, back_btn_h, "← VOLVER", 
+                             (80, 80, 80), (120, 120, 120))
         
         clock = pygame.time.Clock()
         running = True
         
         while running:
+            # Actualizar posiciones de colisión de los botones respecto al scroll
+            for i, button in enumerate(buttons):
+                row = i // patterns_per_row
+                button.rect.y = start_y + row * (button_size + spacing) - int(scroll_y)
+                
+            mouse_pos = pygame.mouse.get_pos()
+            
+            # Calcular dimensiones del tirador (handle)
+            handle_height = max(40, int(slider_height * (visible_height / max(1.0, float(content_height)))))
+            handle_y = slider_y + int((slider_height - handle_height) * (scroll_y / max(1.0, max_scroll_y)))
+            
+            handle_rect = pygame.Rect(slider_x, handle_y, slider_width, handle_height)
+            track_rect = pygame.Rect(slider_x, slider_y, slider_width, slider_height)
+            handle_hover = handle_rect.collidepoint(mouse_pos)
+            
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return {'mode': 'exit'}
@@ -235,32 +274,79 @@ class GUI:
                 if event.type in (pygame.WINDOWFOCUSGAINED, pygame.WINDOWFOCUSLOST):
                     pass
                 
+                # Scroll con rueda de ratón / gestos touchpad
+                if event.type == pygame.MOUSEWHEEL:
+                    if max_scroll_y > 0:
+                        scroll_y = max(0.0, min(max_scroll_y, scroll_y - event.y * 60.0))
+                
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 4:  # Rueda arriba
+                        scroll_y = max(0.0, scroll_y - 60.0)
+                    elif event.button == 5:  # Rueda abajo
+                        scroll_y = min(max_scroll_y, scroll_y + 60.0)
+                    elif event.button == 1 and max_scroll_y > 0:
+                        if handle_rect.collidepoint(event.pos):
+                            dragging_slider = True
+                            drag_offset_y = event.pos[1] - handle_y
+                        elif track_rect.collidepoint(event.pos):
+                            if slider_height > handle_height:
+                                new_h_y = event.pos[1] - handle_height // 2
+                                new_h_y = max(slider_y, min(new_h_y, slider_y + slider_height - handle_height))
+                                scroll_y = ((new_h_y - slider_y) / float(slider_height - handle_height)) * max_scroll_y
+                                dragging_slider = True
+                                drag_offset_y = handle_height // 2
+                
+                if event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1:
+                        dragging_slider = False
+                
+                if event.type == pygame.MOUSEMOTION and dragging_slider and max_scroll_y > 0:
+                    new_h_y = event.pos[1] - drag_offset_y
+                    new_h_y = max(slider_y, min(new_h_y, slider_y + slider_height - handle_height))
+                    if slider_height > handle_height:
+                        scroll_y = ((new_h_y - slider_y) / float(slider_height - handle_height)) * max_scroll_y
+                    else:
+                        scroll_y = 0.0
+                
                 # Botón volver
                 if back_button.handle_event(event):
                     return self.show_main_menu()
                 
-                # Botones de patrones
+                # Botones de patrones (solo cliqueables si están en la región visible del viewport)
                 for i, button in enumerate(buttons):
-                    if button.handle_event(event):
-                        return {'mode': 'admin', 'pattern': i, 'beats': 0}
+                    if button.rect.y + button_size >= viewport_top and button.rect.y <= viewport_bottom:
+                        if button.handle_event(event):
+                            return {'mode': 'admin', 'pattern': i, 'beats': 0}
             
             # Dibujar
             self.screen.blit(self.bg_gradient, (0, 0))
             
             # Título
             title = self.title_font.render("MODO ADMIN", True, (255, 255, 255))
-            title_rect = title.get_rect(center=(center_x, 80))
+            title_rect = title.get_rect(center=(center_x, int(self.screen_height * 0.074))) # ~80 en 1080
             self.screen.blit(title, title_rect)
             
-            subtitle = self.info_font.render("Selecciona un patrón visual (0-35)", True, (200, 200, 200))
-            subtitle_rect = subtitle.get_rect(center=(center_x, 150))
+            subtitle = self.info_font.render(f"Selecciona un patrón visual (0-{config.TOTAL_PATTERNS-1})", True, (200, 200, 200))
+            subtitle_rect = subtitle.get_rect(center=(center_x, int(self.screen_height * 0.139))) # ~150 en 1080
             self.screen.blit(subtitle, subtitle_rect)
             
-            # Botones
+            # Dibujar botones recortados (clipping) en el viewport
+            self.screen.set_clip(pygame.Rect(0, viewport_top - 5, self.screen_width, viewport_height + 10))
             for button in buttons:
-                button.draw(self.screen, self.button_font)
+                if button.rect.y + button_size >= viewport_top - 10 and button.rect.y <= viewport_bottom + 10:
+                    button.draw(self.screen, self.button_font)
+            self.screen.set_clip(None) # Restaurar dibujo a pantalla completa
             
             back_button.draw(self.screen, self.button_font)
+            
+            # Dibujar la Scrollbar si el contenido supera la pantalla
+            if max_scroll_y > 0:
+                pygame.draw.rect(self.screen, (40, 40, 60), track_rect, border_radius=7)
+                pygame.draw.rect(self.screen, (60, 60, 90), track_rect, 2, border_radius=7)
+                
+                h_color = (180, 180, 250) if (handle_hover or dragging_slider) else (110, 110, 170)
+                pygame.draw.rect(self.screen, h_color, handle_rect, border_radius=7)
+                pygame.draw.rect(self.screen, (255, 255, 255), handle_rect, 2, border_radius=7)
             
             pygame.display.flip()
             clock.tick(60)
@@ -272,9 +358,9 @@ class GUI:
         center_x = self.screen_width // 2
         center_y = self.screen_height // 2
         
-        button_width = 300
-        button_height = 80
-        spacing = 20
+        button_width = int(self.screen_width * 0.156) # ~300 en 1920
+        button_height = int(self.screen_height * 0.074) # ~80 en 1080
+        spacing = int(self.screen_height * 0.018) # ~20 en 1080
         
         # Opciones de beats
         beat_options = [8, 16, 24, 32, 48, 64]
@@ -284,14 +370,17 @@ class GUI:
             row = i // 3
             col = i % 3
             x = center_x - (3 * (button_width + spacing)) // 2 + col * (button_width + spacing)
-            y = center_y - 100 + row * (button_height + spacing)
+            y = center_y - int(self.screen_height * 0.092) + row * (button_height + spacing)
             btn = Button(x, y, button_width, button_height, f"{beats} BEATS", 
                         (60, 100, 140), (90, 140, 190))
             buttons.append((btn, beats))
         
-        # Botón volver
-        back_button = Button(50, self.screen_height - 120, 200, 70, "← VOLVER", 
-                            (80, 80, 80), (120, 120, 120))
+        # Botón volver escalado
+        back_btn_w = int(self.screen_width * 0.104) # ~200 en 1920
+        back_btn_h = int(self.screen_height * 0.065) # ~70 en 1080
+        back_button = Button(int(self.screen_width * 0.026), self.screen_height - back_btn_h - int(self.screen_height * 0.046), 
+                             back_btn_w, back_btn_h, "← VOLVER", 
+                             (80, 80, 80), (120, 120, 120))
         
         clock = pygame.time.Clock()
         running = True
@@ -323,11 +412,11 @@ class GUI:
             
             # Título
             title = self.title_font.render("MODO ORDER", True, (255, 255, 255))
-            title_rect = title.get_rect(center=(center_x, 150))
+            title_rect = title.get_rect(center=(center_x, int(self.screen_height * 0.139))) # ~150 en 1080
             self.screen.blit(title, title_rect)
             
             subtitle = self.info_font.render("Selecciona los beats para cambiar de patrón", True, (200, 200, 200))
-            subtitle_rect = subtitle.get_rect(center=(center_x, 240))
+            subtitle_rect = subtitle.get_rect(center=(center_x, int(self.screen_height * 0.222))) # ~240 en 1080
             self.screen.blit(subtitle, subtitle_rect)
             
             # Botones

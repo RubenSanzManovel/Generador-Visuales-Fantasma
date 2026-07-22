@@ -135,7 +135,7 @@ RANDOM_BEAT_RANGE: Tuple[int, int] = (30, 70)
 
 # Número total de patrones visuales disponibles en los shaders
 # IMPORTANTE: Debe coincidir con el número de efectos en fragment.glsl
-TOTAL_PATTERNS: int = 42
+TOTAL_PATTERNS: int = 55
 
 # Número de rayos/partículas/gotas generadas por cada beat detectado
 # Mayor valor = efectos más densos y llamativos
@@ -151,7 +151,7 @@ PATTERN_TRANSITION_TIME: float = 0.5
 
 # Intensidad del efecto bloom (resplandor)
 # 0.0 = desactivado, 1.0 = bloom máximo
-BLOOM_INTENSITY: float = 0.3
+BLOOM_INTENSITY: float = 0.0
 
 # Intensidad de viñeta (oscurecimiento de bordes)
 # 0.0 = sin viñeta, 1.0 = viñeta fuerte
@@ -213,7 +213,7 @@ PALETTE_OCEAN: List[Tuple[float, float, float]] = [
 DEBUG_MODE: bool = False
 
 # Mostrar contador de FPS en pantalla
-SHOW_FPS: bool = True
+SHOW_FPS: bool = False
 
 # Mostrar información de audio en tiempo real
 SHOW_AUDIO_INFO: bool = False
@@ -269,7 +269,7 @@ def validate_config() -> bool:
         
         return True
     except AssertionError as e:
-        print(f"❌ Error de configuración: {e}")
+        print(f"[ERROR] Error de configuracion: {e}")
         return False
 
 # Ejecutar validación al importar el módulo

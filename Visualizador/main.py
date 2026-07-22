@@ -90,6 +90,17 @@ def initialize_state(pattern_mode: str, initial_pattern: int = 0) -> Dict[str, A
         'midi_filter_hpf_left': 0.0,
         'midi_filter_lpf_right': 0.0,
         'midi_filter_hpf_right': 0.0,
+        'midi_low_left': 0.5,
+        'midi_low_right': 0.5,
+        'midi_mid_left': 0.5,
+        'midi_mid_right': 0.5,
+        'midi_high_left': 0.5,
+        'midi_high_right': 0.5,
+        'midi_eff1': False,
+        'midi_eff2': False,
+        'midi_eff3': False,
+        'midi_fadeff_left': 0.0,
+        'midi_fadeff_right': 0.0,
         'midi_auto_pattern': True,
         'midi_color_lock': False,
         'midi_locked_color': 0,
@@ -102,6 +113,7 @@ def initialize_state(pattern_mode: str, initial_pattern: int = 0) -> Dict[str, A
         'midi_hotcue_fx_start': 0.0,
         'midi_hotcue_fx_until': 0.0,
         'midi_hotcue_fx_seed': 0.0,
+        'pattern_history': [initial_pattern],
 
         # === RENDER OVERRIDES ===
         'render_bloom': config.BLOOM_INTENSITY,
@@ -110,6 +122,7 @@ def initialize_state(pattern_mode: str, initial_pattern: int = 0) -> Dict[str, A
         'render_saturation': config.SATURATION,
         'render_base_color': None,
         'render_zoom': 1.0,
+        'color_grading_style': 0,
     }
     # Establece el primer objetivo de beats
     state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
@@ -160,6 +173,7 @@ def apply_midi_modifiers(state: Dict[str, Any]) -> None:
     current_time = state['current_time']
     flicker_amount = max(lpf, hpf)
     state['render_base_color'] = None
+    state['render_zoom'] = 1.0
     if flicker_amount > 0.01:
         # Curva suave: poco al inicio, mucho al final
         flicker_curve = flicker_amount * flicker_amount
@@ -230,11 +244,33 @@ def apply_midi_modifiers(state: Dict[str, Any]) -> None:
     if state.get('midi_color_lock', False):
         state['color_index'] = state.get('midi_locked_color', state['color_index'])
 
-    state['render_bloom'] = _clamp(bloom, 0.0, 2.0)
+    # --- APLICAR CONTROLES MIDI EQ Y FADERS DE EFECTO ---
+    midi_low_left = state.get('midi_low_left', 0.5)
+    midi_low_right = state.get('midi_low_right', 0.5)
+    midi_low = (midi_low_left + midi_low_right) * 0.5
+
+    midi_high_left = state.get('midi_high_left', 0.5)
+    midi_high_right = state.get('midi_high_right', 0.5)
+    midi_high = (midi_high_left + midi_high_right) * 0.5
+
+    midi_fadeff_left = state.get('midi_fadeff_left', 0.0)
+    midi_fadeff_right = state.get('midi_fadeff_right', 0.0)
+    midi_fadeff = (midi_fadeff_left + midi_fadeff_right) * 0.5
+    state['midi_fadeff'] = midi_fadeff  # Guardar en estado para el renderer y audio handler
+
+    # 1. Low controla el tamaño base/zoom (de 0.03 a 3.2 veces el original)
+    state['render_zoom'] = state.get('render_zoom', 1.0) * (midi_low * 2.0)
+
+    # 2. High controla el resplandor de Bloom (reposo en el centro 0.5, efecto espejo al girar a cualquier lado)
+    high_diff = abs(midi_high - 0.5) * 2.0
+    bloom_modifier = 1.0 + high_diff * 8.0 # 0.5 -> 1.0 (neutro) | 0.0 o 1.0 -> 9.0 (brillo extremo)
+    bloom = bloom * bloom_modifier
+
+    state['render_bloom'] = _clamp(bloom, 0.0, 5.5)
     state['render_vignette'] = _clamp(vignette, 0.0, 1.0)
-    state['render_contrast'] = _clamp(contrast, 0.3, 2.0)
-    state['render_saturation'] = _clamp(saturation, 0.0, 2.0)
-    state['render_zoom'] = _clamp(state.get('render_zoom', 1.0), 0.6, 1.6)
+    state['render_contrast'] = _clamp(contrast, 0.3, 2.5)
+    state['render_saturation'] = _clamp(saturation, 0.0, 2.5)
+    state['render_zoom'] = _clamp(state['render_zoom'], 0.03, 3.2)
 
 def print_welcome_message():
     """Imprime mensaje de bienvenida con información del programa."""
@@ -261,19 +297,19 @@ def validate_environment() -> bool:
     
     import os
     if not os.path.exists('shaders/vertex.glsl'):
-        print("❌ ERROR: No se encuentra shaders/vertex.glsl")
+        print("[ERROR] ERROR: No se encuentra shaders/vertex.glsl")
         return False
     if not os.path.exists('shaders/fragment.glsl'):
-        print("❌ ERROR: No se encuentra shaders/fragment.glsl")
+        print("[ERROR] ERROR: No se encuentra shaders/fragment.glsl")
         return False
     
-    print("✅ Shaders encontrados")
+    print("[OK] Shaders encontrados")
     
     if not config.validate_config():
-        print("❌ ERROR: Configuración inválida")
+        print("[ERROR] ERROR: Configuración inválida")
         return False
     
-    print("✅ Configuración válida")
+    print("[OK] Configuración válida")
     return True
 
 # ============================================================================
@@ -291,227 +327,293 @@ def main():
         
         # Validar entorno
         if not validate_environment():
-            print("\n❌ No se puede iniciar el programa debido a errores de configuración")
+            print("\n[ERROR] No se puede iniciar el programa debido a errores de configuración")
             input("Presiona Enter para salir...")
             return 1
-        
-        # ================================================================
-        # MOSTRAR GUI PARA SELECCIONAR MODO
-        # ================================================================
-        gui = GUI()
-        user_config = gui.show_main_menu()
-        gui.close()
-        
-        # Si el usuario sale, terminar
-        if user_config['mode'] == 'exit':
-            print("\n👋 Saliendo del programa...")
-            return 0
-        
-        # Extraer configuración seleccionada
-        current_pattern_mode = user_config['mode']
-        admin_pattern_index = user_config['pattern']
-        
-        # Configurar beats para modo order
-        if current_pattern_mode == 'order':
-            config.SHAPE_CHANGE_BEATS = user_config['beats']
-        
-        print("\n" + "=" * 70)
-        print(f"⚙️  Modo seleccionado: '{current_pattern_mode.upper()}'")
-        if current_pattern_mode == 'admin':
-            print(f"   Patrón seleccionado: {admin_pattern_index}")
-        elif current_pattern_mode == 'order':
-            print(f"   Cambiando cada: {config.SHAPE_CHANGE_BEATS} beats")
-        elif current_pattern_mode == 'random':
-            print(f"   Cambiando cada: {config.RANDOM_BEAT_RANGE[0]} a {config.RANDOM_BEAT_RANGE[1]} beats")
-        print("=" * 70)
-        
-        # ================================================================
-        # INICIALIZACIÓN DE COMPONENTES
-        # ================================================================
-        print("\n🚀 Iniciando componentes del visualizador...\n")
-        
-        renderer = Renderer()
-        audio_handler = AudioHandler()
-        
-        if not audio_handler.start_stream():
-            print("\n❌ No se pudo iniciar la captura de audio")
-            renderer.close()
-            input("\nPresiona Enter para salir...")
-            return 1
-        
-        # Inicializar estado (pasa el modo y el índice inicial elegido)
-        state = initialize_state(current_pattern_mode, admin_pattern_index)
-
-        # Inicializar MIDI (si el puerto virtual esta disponible)
-        midi_handler = MidiHandler()
-        
-        if current_pattern_mode != 'admin':
-            print(f"🔥 Modo de cambio: '{state['pattern_mode']}'. Próximo cambio en {state['current_beat_target']} beats.")
-        
-        clock = pygame.time.Clock()
-        start_time = pygame.time.get_ticks()
-        running = True
-        
-        print("\n✅ Todos los componentes iniciados correctamente\n")
-        
-        # ================================================================
-        # BUCLE PRINCIPAL
-        # ================================================================
-        
-        # Variable para controlar si la ventana tiene foco
-        has_focus = True
-        minimized = False
-        
-        while running:
-            # Pump de eventos para asegurar respuesta del sistema operativo
-            pygame.event.pump()
             
-            # 1. PROCESAMIENTO DE EVENTOS
-            events = pygame.event.get()
-            for event in events:
-                if event.type == pygame.QUIT:
-                    running = False
-                    print("\n👋 Cerrando visualizador...")
+        from gui import GUI
+        
+        # Bucle exterior para permitir volver al menú principal al pulsar ESC
+        while True:
+            # ================================================================
+            # MOSTRAR GUI PARA SELECCIONAR MODO
+            # ================================================================
+            gui = GUI()
+            user_config = gui.show_main_menu()
+            gui.close()
+            
+            # Si el usuario sale, terminar
+            if user_config['mode'] == 'exit':
+                print("\n[*] Saliendo del programa...")
+                break
+            
+            # Extraer configuración seleccionada
+            current_pattern_mode = user_config['mode']
+            admin_pattern_index = user_config['pattern']
+            
+            # Configurar beats para modo order
+            if current_pattern_mode == 'order':
+                config.SHAPE_CHANGE_BEATS = user_config['beats']
+            
+            print("\n" + "=" * 70)
+            print(f"[+]  Modo seleccionado: '{current_pattern_mode.upper()}'")
+            if current_pattern_mode == 'admin':
+                print(f"   Patrón seleccionado: {admin_pattern_index}")
+            elif current_pattern_mode == 'order':
+                print(f"   Cambiando cada: {config.SHAPE_CHANGE_BEATS} beats")
+            elif current_pattern_mode == 'random':
+                print(f"   Cambio automático desactivado (control manual vía MIDI/Teclado)")
+            print("=" * 70)
+            
+            # ================================================================
+            # INICIALIZACIÓN DE COMPONENTES
+            # ================================================================
+            print("\n🚀 Iniciando componentes del visualizador...\n")
+            
+            renderer = Renderer()
+            audio_handler = AudioHandler()
+            
+            if not audio_handler.start_stream():
+                print("\n[ERROR] No se pudo iniciar la captura de audio")
+                renderer.close()
+                input("\nPresiona Enter para salir...")
+                return 1
+            
+            # Inicializar estado (pasa el modo y el índice inicial elegido)
+            state = initialize_state(current_pattern_mode, admin_pattern_index)
+    
+            # Inicializar MIDI (si el puerto virtual esta disponible)
+            midi_handler = MidiHandler()
+            
+            if current_pattern_mode not in ('admin', 'random'):
+                print(f"[*] Modo de cambio: '{state['pattern_mode']}'. Próximo cambio en {state['current_beat_target']} beats.")
+            elif current_pattern_mode == 'random':
+                print(f"[*] Modo de cambio: '{state['pattern_mode']}'. Cambio automático desactivado (control manual vía MIDI/Teclado).")
+            
+            clock = pygame.time.Clock()
+            start_time = pygame.time.get_ticks()
+            running = True
+            
+            print("\n[OK] Todos los componentes iniciados correctamente\n")
+            
+            # ================================================================
+            # BUCLE PRINCIPAL DE RENDERIZADO
+            # ================================================================
+            has_focus = True
+            minimized = False
+            
+            while running:
+                # Pump de eventos para asegurar respuesta del sistema operativo
+                pygame.event.pump()
                 
-                # Manejar eventos de ventana para evitar bloqueos
-                elif event.type == pygame.WINDOWFOCUSGAINED:
-                    has_focus = True
-                    minimized = False
-                    if config.DEBUG_MODE:
-                        print("🔍 Ventana recuperó el foco")
-                elif event.type == pygame.WINDOWFOCUSLOST:
-                    has_focus = False
-                    if config.DEBUG_MODE:
-                        print("🔍 Ventana perdió el foco")
-                elif event.type == pygame.WINDOWMINIMIZED:
-                    minimized = True
-                    if config.DEBUG_MODE:
-                        print("🔍 Ventana minimizada")
-                elif event.type == pygame.WINDOWRESTORED:
-                    minimized = False
-                    if config.DEBUG_MODE:
-                        print("🔍 Ventana restaurada")
-                elif event.type in (pygame.WINDOWEXPOSED, pygame.WINDOWSHOWN):
-                    # Ventana se volvió visible
-                    pass
-                
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
+                # 1. PROCESAMIENTO DE EVENTOS
+                events = pygame.event.get()
+                for event in events:
+                    if event.type == pygame.QUIT:
                         running = False
-                        print("\n👋 Cerrando visualizador...")
+                        print("\n[*] Cerrando visualizador y saliendo...")
+                        # Limpieza inmediata y salida del programa
+                        audio_handler.stop_stream()
+                        midi_handler.close()
+                        renderer.close()
+                        return 0
                     
-                    elif event.key == pygame.K_d:
-                        config.DEBUG_MODE = not config.DEBUG_MODE
-                        print(f"🐛 Debug mode: {'ON' if config.DEBUG_MODE else 'OFF'}")
+                    # Manejar eventos de ventana para evitar bloqueos
+                    elif event.type == pygame.WINDOWFOCUSGAINED:
+                        has_focus = True
+                        minimized = False
+                        if config.DEBUG_MODE:
+                            print("🔍 Ventana recuperó el foco")
+                    elif event.type == pygame.WINDOWFOCUSLOST:
+                        has_focus = False
+                        if config.DEBUG_MODE:
+                            print("🔍 Ventana perdió el foco")
+                    elif event.type == pygame.WINDOWMINIMIZED:
+                        minimized = True
+                        if config.DEBUG_MODE:
+                            print("🔍 Ventana minimizada")
+                    elif event.type == pygame.WINDOWRESTORED:
+                        minimized = False
+                        if config.DEBUG_MODE:
+                            print("🔍 Ventana restaurada")
+                    elif event.type in (pygame.WINDOWEXPOSED, pygame.WINDOWSHOWN):
+                        pass
                     
-                    # SPACE: Cambiar patrón manualmente (SOLO SI NO ES ADMIN)
-                    elif event.key == pygame.K_SPACE and state['pattern_mode'] != 'admin':
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            running = False
+                            print("\n[*] Volviendo al menu principal...")
+                        
+                        elif event.key == pygame.K_d:
+                            config.DEBUG_MODE = not config.DEBUG_MODE
+                            print(f"[*] Debug mode: {'ON' if config.DEBUG_MODE else 'OFF'}")
+                        
+                        # SPACE: Cambiar patrón manualmente (SOLO SI NO ES ADMIN)
+                        elif event.key == pygame.K_SPACE and state['pattern_mode'] != 'admin':
+                            state['beat_count'] = 0
+                            state['pattern_change_time'] = state['current_time']
+                            state['prev_pattern_index'] = state['pattern_index']
+                            
+                            if state['pattern_mode'] == "random":
+                                total = config.TOTAL_PATTERNS
+                                current = state['pattern_index']
+                                history = state.get('pattern_history', [])
+                                excluded = set(history[-20:])
+                                excluded.add(current)
+                                
+                                candidates = [idx for idx in range(total) if idx not in excluded]
+                                
+                                history_limit = 20
+                                while not candidates and history_limit > 0:
+                                    history_limit -= 1
+                                    excluded = set(history[-history_limit:])
+                                    excluded.add(current)
+                                    candidates = [idx for idx in range(total) if idx not in excluded]
+                                    
+                                if candidates:
+                                    new_index = random.choice(candidates)
+                                else:
+                                    new_index = random.randint(0, total - 1)
+                                    while new_index == current and total > 1:
+                                        new_index = random.randint(0, total - 1)
+                                
+                                state['pattern_index'] = new_index
+                                # Registrar en historial
+                                history = state.setdefault('pattern_history', [])
+                                history.append(new_index)
+                                if len(history) > 50:
+                                    state['pattern_history'] = history[-50:]
+                            else:
+                                state['pattern_index'] = (state['pattern_index'] + 1) % config.TOTAL_PATTERNS
+                            
+                            state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
+                            print(f"[*] Patrón cambiado manualmente a: {state['pattern_index']}. Próximo en {state['current_beat_target']} beats.")
+                        
+                        # C: Cambiar color manualmente
+                        elif event.key == pygame.K_c:
+                            state['color_index'] = (state['color_index'] + 1) % len(config.COLOR_PALETTE)
+                            print(f"[*] Color cambiado manually a: {state['color_index']}")
+                        
+                        # V: Cambiar estilo de graduación de color (LUT)
+                        elif event.key == pygame.K_v:
+                            state['color_grading_style'] = (state.get('color_grading_style', 0) + 1) % 5
+                            luts = ["Sin LUT (Normal)", "Teal & Orange", "Cyberpunk", "Vintage Warm", "Monocromatico de Alto Contraste"]
+                            print(f"[*] Filtro de color (LUT) cambiado a: {luts[state['color_grading_style']]}")
+                
+                # 2. ACTUALIZACIÓN DEL TIEMPO
+                prev_time = state.get('current_time', 0.0)
+                state['current_time'] = (pygame.time.get_ticks() - start_time) / 1000.0
+                dt = state['current_time'] - prev_time if prev_time > 0.0 else 0.016
+    
+                # 2.1 PROCESAMIENTO MIDI
+                midi_handler.poll(state, state['current_time'])
+                
+                # 3. PROCESAMIENTO DE AUDIO
+                audio_handler.process_audio(state)
+                
+                # 3.0 ACUMULAR TIEMPO REACTIVO PARA SHADERS
+                # El tiempo avanza lento (0.45x) en calma y acelera drásticamente (hasta 5x) con los bombos (bass_energy)
+                bass_energy = state.get('bass_energy', 0.0)
+                speed_factor = 0.45 + bass_energy * 4.5
+                state['reactive_time'] = state.get('reactive_time', 0.0) + dt * speed_factor
+    
+                # 3.1 APLICAR MODIFICADORES MIDI
+                apply_midi_modifiers(state)
+                
+                # Si la ventana está minimizada, no renderizar (ahorra recursos)
+                if minimized:
+                    clock.tick(10)  # Reducir FPS cuando está minimizado
+                    continue
+                
+                # --- LÓGICA DE CAMBIO DE PATRÓN AUTOMÁTICO ---
+                # (Se salta si estamos en modo admin)
+                if state['pattern_mode'] not in ('admin', 'random'):
+                    override_age = state['current_time'] - state.get('midi_pattern_override_time', 0.0)
+                    if (state.get('midi_auto_pattern', True) and
+                        override_age > 0.1 and
+                        state['beat_count'] >= state['current_beat_target']):
                         state['beat_count'] = 0
                         state['pattern_change_time'] = state['current_time']
                         state['prev_pattern_index'] = state['pattern_index']
                         
                         if state['pattern_mode'] == "random":
-                            new_index = np.random.randint(0, config.TOTAL_PATTERNS)
-                            while new_index == state['pattern_index']:
-                                new_index = np.random.randint(0, config.TOTAL_PATTERNS)
+                            total = config.TOTAL_PATTERNS
+                            current = state['pattern_index']
+                            history = state.get('pattern_history', [])
+                            excluded = set(history[-20:])
+                            excluded.add(current)
+                            
+                            candidates = [idx for idx in range(total) if idx not in excluded]
+                            
+                            history_limit = 20
+                            while not candidates and history_limit > 0:
+                                history_limit -= 1
+                                excluded = set(history[-history_limit:])
+                                excluded.add(current)
+                                candidates = [idx for idx in range(total) if idx not in excluded]
+                                
+                            if candidates:
+                                new_index = random.choice(candidates)
+                            else:
+                                new_index = random.randint(0, total - 1)
+                                while new_index == current and total > 1:
+                                    new_index = random.randint(0, total - 1)
+                            
                             state['pattern_index'] = new_index
+                            # Registrar en historial
+                            history = state.setdefault('pattern_history', [])
+                            history.append(new_index)
+                            if len(history) > 50:
+                                state['pattern_history'] = history[-50:]
                         else:
                             state['pattern_index'] = (state['pattern_index'] + 1) % config.TOTAL_PATTERNS
                         
                         state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
-                        print(f"🎨 Patrón cambiado manualmente a: {state['pattern_index']}. Próximo en {state['current_beat_target']} beats.")
-                    
-                    # C: Cambiar color manualmente
-                    elif event.key == pygame.K_c:
-                        state['color_index'] = (state['color_index'] + 1) % len(config.COLOR_PALETTE)
-                        print(f"🎨 Color cambiado manually a: {state['color_index']}")
-            
-            # 2. ACTUALIZACIÓN DEL TIEMPO
-            state['current_time'] = (pygame.time.get_ticks() - start_time) / 1000.0
-
-            # 2.1 PROCESAMIENTO MIDI
-            midi_handler.poll(state, state['current_time'])
-            
-            # 3. PROCESAMIENTO DE AUDIO
-            audio_handler.process_audio(state)
-
-            # 3.1 APLICAR MODIFICADORES MIDI
-            apply_midi_modifiers(state)
-            
-            # Si la ventana está minimizada, no renderizar (ahorra recursos)
-            if minimized:
-                clock.tick(10)  # Reducir FPS cuando está minimizado
-                continue
-            
-            # --- LÓGICA DE CAMBIO DE PATRÓN AUTOMÁTICO ---
-            # (Se salta si estamos en modo admin)
-            if state['pattern_mode'] != 'admin':
-                override_age = state['current_time'] - state.get('midi_pattern_override_time', 0.0)
-                if (state.get('midi_auto_pattern', True) and
-                    override_age > 0.1 and
-                    state['beat_count'] >= state['current_beat_target']):
-                    state['beat_count'] = 0
-                    state['pattern_change_time'] = state['current_time']
-                    state['prev_pattern_index'] = state['pattern_index']
-                    
-                    if state['pattern_mode'] == "random":
-                        new_index = random.randint(0, config.TOTAL_PATTERNS - 1)
-                        while new_index == state['pattern_index']:
-                            new_index = random.randint(0, config.TOTAL_PATTERNS - 1)
-                        state['pattern_index'] = new_index
-                    else:
-                        state['pattern_index'] = (state['pattern_index'] + 1) % config.TOTAL_PATTERNS
-                    
-                    state['current_beat_target'] = _get_next_beat_target(state['pattern_mode'])
-                    
-                    if config.DEBUG_MODE:
-                        print(f"🎨 CAMBIO DE PATRÓN a: {state['pattern_index']}. Próximo cambio en {state['current_beat_target']} beats.")
-            
-            # 4. RENDERIZADO
-            renderer.render(state)
-            
-            # 5. CONTROL DE FRAMERATE
-            clock.tick(config.TARGET_FPS)
-            state['frames_rendered'] += 1
-            
-            if config.DEBUG_MODE and state['frames_rendered'] % 300 == 0:
-                debug_beat_info = f"Beats: {state['beat_count']} / {state['current_beat_target']}"
-                if state['pattern_mode'] == 'admin':
-                    debug_beat_info = "(Modo Admin: cambios bloqueados)"
+                        
+                        if config.DEBUG_MODE:
+                            print(f"[*] CAMBIO DE PATRÓN a: {state['pattern_index']}. Próximo cambio en {state['current_beat_target']} beats.")
                 
-                print(f"\n📊 STATS - Frame {state['frames_rendered']}:")
-                print(f"   Patrón: {state['pattern_index']} {debug_beat_info}")
-                print(f"   Amplitud: {state['current_amplitude']:.3f}")
+                # 4. RENDERIZADO
+                renderer.render(state)
                 
-        # ================================================================
-        # LIMPIEZA Y CIERRE
-        # ================================================================
-        print("\n🧹 Limpiando recursos...")
-        audio_handler.stop_stream()
-        midi_handler.close()
-        renderer.close()
-        
-        print(f"\n📊 ESTADÍSTICAS FINALES:")
-        print(f"   Frames renderizados: {state['frames_rendered']}")
-        print(f"   Tiempo total: {state['current_time']:.2f} segundos")
-        if state['current_time'] > 0:
-            avg_fps = state['frames_rendered'] / state['current_time']
-            print(f"   FPS promedio: {avg_fps:.2f}")
-        
-        print("\n" + "=" * 70)
-        print("   ✅ Visualizador cerrado correctamente")
-        print("=" * 70 + "\n")
-        
+                # 5. CONTROL DE FRAMERATE
+                clock.tick(config.TARGET_FPS)
+                state['frames_rendered'] += 1
+                
+                if config.DEBUG_MODE and state['frames_rendered'] % 300 == 0:
+                    debug_beat_info = f"Beats: {state['beat_count']} / {state['current_beat_target']}"
+                    if state['pattern_mode'] == 'admin':
+                        debug_beat_info = "(Modo Admin: cambios bloqueados)"
+                    
+                    print(f"\n📊 STATS - Frame {state['frames_rendered']}:")
+                    print(f"   Patrón: {state['pattern_index']} {debug_beat_info}")
+                    print(f"   Amplitud: {state['current_amplitude']:.3f}")
+                    
+            # ================================================================
+            # LIMPIEZA DE ESTE CICLO
+            # ================================================================
+            print("\n[*] Limpiando recursos del ciclo actual...")
+            audio_handler.stop_stream()
+            midi_handler.close()
+            renderer.close()
+            
+            print(f"\n📊 ESTADÍSTICAS DEL CICLO:")
+            print(f"   Frames renderizados: {state['frames_rendered']}")
+            print(f"   Tiempo transcurrido: {state['current_time']:.2f} segundos")
+            if state['current_time'] > 0:
+                avg_fps = state['frames_rendered'] / state['current_time']
+                print(f"   FPS promedio: {avg_fps:.2f}")
+            print("\n" + "=" * 70 + "\n")
+            
         return 0
-    
+        
     except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupción del usuario (Ctrl+C)")
-        print("🧹 Limpiando recursos...")
+        print("\n\n[!]  Interrupción del usuario (Ctrl+C)")
         return 130
-    
+        
     except Exception as e:
         print("\n" + "!" * 70)
-        print("   ❌ ERROR CRÍTICO EN EL PROGRAMA")
+        print("   [ERROR] ERROR CRÍTICO EN EL PROGRAMA")
         print("!" * 70)
         print(f"\nTipo de error: {type(e).__name__}")
         print(f"Mensaje: {str(e)}")
@@ -530,7 +632,7 @@ if __name__ == '__main__':
         exit_code = main()
         sys.exit(exit_code)
     except Exception as e:
-        print(f"\n❌ Error fatal: {e}")
+        print(f"\n[ERROR] Error fatal: {e}")
         traceback.print_exc()
         input("\nPresiona Enter para salir...")
         sys.exit(1)
